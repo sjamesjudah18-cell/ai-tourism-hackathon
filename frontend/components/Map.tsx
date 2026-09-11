@@ -15,6 +15,9 @@ export type MapLocation = {
   lng: number;
   time?: string;
   cost?: number;
+  /** Set when an alert names this stop, so the map can flag it. */
+  affected?: boolean;
+  affectedReason?: string;
 };
 
 type MapProps = {
@@ -70,7 +73,11 @@ export default function Map({
     if (customLocations && customLocations.length > 0) {
       return customLocations;
     }
-    return isHyderabad ? hyderabadLocations : hyderabadLocations;
+    // The demo set is Hyderabad-specific, so it is only ever shown for
+    // Hyderabad. Showing these pins for Goa or Jaipur - which the previous
+    // fallback did - would be fabricated data on the most visible surface
+    // in the product.
+    return isHyderabad ? hyderabadLocations : [];
   }, [customLocations, isHyderabad]);
 
   const filteredLocations = useMemo(() => {
@@ -119,9 +126,23 @@ export default function Map({
               onClick={() => setSelectedMarker(location)}
             >
               <div className="group relative cursor-pointer">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-[#171717] text-sm text-white shadow-xl transition-transform duration-200 group-hover:scale-110">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm shadow-xl transition-transform duration-200 group-hover:scale-110 ${
+                    location.affected
+                      ? "border-amber-400 bg-amber-500 text-white"
+                      : "border-white bg-[#171717] text-white"
+                  }`}
+                >
                   {getMarkerIcon(location.category)}
                 </div>
+
+                {/* Affected stops get a pulse so they read at a glance */}
+                {location.affected && (
+                  <span
+                    className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-amber-400/40"
+                    aria-hidden="true"
+                  />
+                )}
 
                 {/* Marker tooltip */}
                 <div className="pointer-events-none absolute bottom-12 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-xl bg-[#171717] px-3.5 py-2 text-xs font-medium text-white shadow-2xl group-hover:block">
@@ -131,11 +152,32 @@ export default function Map({
                       {location.time}
                     </span>
                   )}
+                  {location.affectedReason && (
+                    <p className="mt-0.5 max-w-[220px] whitespace-normal text-[10px] text-amber-300">
+                      {location.affectedReason}
+                    </p>
+                  )}
                 </div>
               </div>
             </AdvancedMarker>
           ))}
         </GoogleMap>
+
+        {/* Honest empty state rather than pins from another city */}
+        {filteredLocations.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
+            <div className="pointer-events-auto max-w-xs rounded-2xl border border-black/5 bg-white/95 px-4 py-3.5 text-center shadow-lg backdrop-blur">
+              <p className="text-sm font-semibold text-[#171717]">
+                No mapped stops
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-[#6b6b66]">
+                {activeFilter === "all"
+                  ? `We don't have mapped coordinates for ${destination} on this day yet.`
+                  : "No stops match this filter for the selected day."}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Selected Marker Detail Card */}
         {selectedMarker && (

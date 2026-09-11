@@ -1,27 +1,52 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+/**
+ * The itinerary page.
+ *
+ * The plan loads first and renders on its own. Reality data - weather,
+ * modelled traffic, local news, alerts - is gathered separately afterwards and
+ * fills in around it. That separation is deliberate: the itinerary must never
+ * be held up, or taken down, by an external API it does not depend on.
+ *
+ * Alerts affecting the selected day appear above the timeline and route through
+ * the shared TravelUpdateCard flow. Nothing here mutates the plan; the only
+ * change path is a traveller confirming one of those cards.
+ */
+
 import Link from "next/link";
-import Navbar from "../../components/Navbar";
-import Footer from "../../components/Footer";
-import Map, { MapLocation } from "../../components/Map";
-import ItineraryCard from "../../components/ItineraryCard";
-import HotelCard from "../../components/HotelCard";
-import PlaceCard from "../../components/PlaceCard";
-import BudgetCard from "../../components/BudgetCard";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AIChat from "../../components/AICHAT";
+import BudgetCard from "../../components/BudgetCard";
+import Footer from "../../components/Footer";
+import HotelCard from "../../components/HotelCard";
+import ItineraryCard from "../../components/ItineraryCard";
+// Imported as TripMap so it does not shadow the built-in Map constructor,
+// which is used for the lookup tables below.
+import TripMap, { MapLocation } from "../../components/Map";
+import Navbar from "../../components/Navbar";
 import {
-  generateItinerary,
-  ItineraryResponse,
+  SectionSkeleton,
+  StatusBadge,
+  relativeTime,
+} from "../../components/reality/RealityPrimitives";
+import TravelUpdateCard from "../../components/reality/TravelUpdateCard";
+import {
   ActivityItem,
-  HotelItem,
+  ItineraryDay,
+  ItineraryResponse,
+  fetchRealityCheck,
+  generateItinerary,
 } from "../../lib/api";
+import type { RealityStatus, TravelAlert, TravelReality } from "../../types/reality";
+
+const STORAGE_KEY = "smartTourismTrip";
+const ITINERARY_KEY = "aiTourismItinerary";
 
 const CITY_HEROES: Record<string, string> = {
   hyderabad:
     "https://images.unsplash.com/photo-1600267197423-8c3f1c3f8f6a?auto=format&fit=crop&w=1800&q=85",
-  goa:
-    "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=1800&q=85",
+  goa: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=1800&q=85",
   jaipur:
     "https://images.unsplash.com/photo-1599661046827-dacff0c0f09a?auto=format&fit=crop&w=1800&q=85",
   delhi:
@@ -37,71 +62,149 @@ const CITY_HEROES: Record<string, string> = {
 const DEFAULT_HERO =
   "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1800&q=85";
 
-export default function ItineraryPage() {
+const DEFAULT_TRIP = {
+  destination: "Hyderabad",
+  days: 4,
+  number_of_days: 4,
+  travelers: 2,
+  number_of_travelers: 2,
+  budget: 25000,
+  total_budget: 25000,
+  interests: ["Food", "Culture", "Adventure"],
+  transport: "Any",
+  hotel: "Comfort",
+};
+
+export default function ItineraryPageWrapper() {
+  return (
+    <Suspense fallback={<LoadingShell destination="your trip" />}>
+      <ItineraryPage />
+    </Suspense>
+  );
+}
+
+function ItineraryPage() {
+  const searchParams = useSearchParams();
+
   const [tripConfig, setTripConfig] = useState<any>(null);
   const [data, setData] = useState<ItineraryResponse | null>(null);
+  const [itinerary, setItinerary] = useState<ItineraryDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState(1);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load trip from session storage and fetch full itinerary from backend
+  // Reality loads independently of the plan.
+  const [reality, setReality] = useState<TravelReality | null>(null);
+  const [loadingReality, setLoadingReality] = useState(false);
+
+  /* ------------------------- Load the itinerary ------------------------ */
   useEffect(() => {
-    const raw = sessionStorage.getItem("smartTourismTrip");
     let parsedTrip: any = null;
-
-    if (raw) {
-      try {
-        parsedTrip = JSON.parse(raw);
-      } catch (e) {
-        parsedTrip = null;
-      }
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (raw) parsedTrip = JSON.parse(raw);
+    } catch {
+      parsedTrip = null;
     }
 
-    // Default fallback to Hyderabad Benchmark if none saved
-    if (!parsedTrip) {
-      parsedTrip = {
-        destination: "Hyderabad",
-        days: 4,
-        number_of_days: 4,
-        travelers: 2,
-        number_of_travelers: 2,
-        budget: 25000,
-        total_budget: 25000,
-        interests: ["Food", "Culture", "Adventure"],
-        transport: "Any",
-        hotel: "Comfort",
-      };
-    }
-
+    if (!parsedTrip) parsedTrip = DEFAULT_TRIP;
     setTripConfig(parsedTrip);
 
-    // Call real FastAPI backend
-    async function loadItinerary() {
+    const dayParam = Number(searchParams.get("day"));
+    if (dayParam > 0) setSelectedDay(dayParam);
+
+    (async () => {
       setLoading(true);
       setErrorMsg(null);
       try {
         const res = await generateItinerary({
           destination: parsedTrip.destination || "Hyderabad",
-          number_of_days: Number(parsedTrip.days || parsedTrip.number_of_days || 4),
-          total_budget: Number(parsedTrip.budget || parsedTrip.total_budget || 25000),
-          number_of_travelers: Number(parsedTrip.travelers || parsedTrip.number_of_travelers || 2),
+          number_of_days: Number(
+            parsedTrip.days || parsedTrip.number_of_days || 4
+          ),
+          total_budget: Number(
+            parsedTrip.budget || parsedTrip.total_budget || 25000
+          ),
+          number_of_travelers: Number(
+            parsedTrip.travelers || parsedTrip.number_of_travelers || 2
+          ),
           interests: parsedTrip.interests || ["Food", "Culture"],
           transport_preference: parsedTrip.transport || "Any",
           accommodation_preference: parsedTrip.hotel || "Comfort",
         });
         setData(res);
-      } catch (err: any) {
-        console.warn("Backend itinerary API fallback activated:", err);
-        setErrorMsg("Running in offline demo mode. Showing curated destination itinerary.");
+        setItinerary(res.itinerary ?? []);
+      } catch (err) {
+        setErrorMsg(
+          "We could not reach the planning service. Check that the backend is running, then try again."
+        );
       } finally {
         setLoading(false);
       }
-    }
-
-    loadItinerary();
+    })();
+    // searchParams is read once on mount deliberately - a day change should
+    // not refetch the whole itinerary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const destinationName = data?.destination || tripConfig?.destination || "Hyderabad";
+  /* ------------- Gather reality once the plan is on screen ------------- */
+  const loadReality = useCallback(
+    async (plan: ItineraryDay[], trip: any) => {
+      if (!trip || plan.length === 0) return;
+
+      setLoadingReality(true);
+      const result = await fetchRealityCheck({
+        destination: trip.destination || "Hyderabad",
+        number_of_days: Number(trip.days || trip.number_of_days || 4),
+        total_budget: Number(trip.budget || trip.total_budget || 25000),
+        number_of_travelers: Number(
+          trip.travelers || trip.number_of_travelers || 2
+        ),
+        interests: trip.interests || DEFAULT_TRIP.interests,
+        accommodation_preference: trip.hotel || "Comfort",
+        start_date: trip.start_date || undefined,
+        origin: trip.origin || undefined,
+        itinerary: plan,
+      });
+      // A null result simply means no reality layer this time - the plan
+      // stays fully usable.
+      if (result) setReality(result);
+      setLoadingReality(false);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (loading || itinerary.length === 0 || !tripConfig) return;
+    loadReality(itinerary, tripConfig);
+  }, [loading, itinerary, tripConfig, loadReality]);
+
+  /* Keep the confirmed plan available to the Reality Check page. */
+  useEffect(() => {
+    if (itinerary.length === 0 || !tripConfig) return;
+    try {
+      sessionStorage.setItem(
+        ITINERARY_KEY,
+        JSON.stringify({ destination: tripConfig.destination, itinerary })
+      );
+    } catch {
+      // Session storage being unavailable is not fatal.
+    }
+  }, [itinerary, tripConfig]);
+
+  /* --------------------- Confirmed change handler ---------------------- */
+  const handleConfirmed = useCallback(
+    (updated: ItineraryDay[]) => {
+      setItinerary(updated);
+      loadReality(updated, tripConfig);
+    },
+    [tripConfig, loadReality]
+  );
+
+  /* ------------------------------ Derived ------------------------------ */
+  const destinationName =
+    data?.destination || tripConfig?.destination || "Hyderabad";
+
   const heroImage = useMemo(() => {
     const key = destinationName.toLowerCase().trim();
     for (const [k, v] of Object.entries(CITY_HEROES)) {
@@ -110,120 +213,149 @@ export default function ItineraryPage() {
     return DEFAULT_HERO;
   }, [destinationName]);
 
-  const totalDays = data?.number_of_days || tripConfig?.days || 4;
-  const currentDayData = useMemo(() => {
-    if (!data?.itinerary || data.itinerary.length === 0) return null;
-    return (
-      data.itinerary.find((d) => d.day === selectedDay) || data.itinerary[0]
-    );
-  }, [data, selectedDay]);
+  const totalDays = itinerary.length || data?.number_of_days || tripConfig?.days || 4;
 
-  // Convert current day activities & hotels to map pins
+  const currentDayData = useMemo(
+    () => itinerary.find((d) => d.day === selectedDay) ?? itinerary[0] ?? null,
+    [itinerary, selectedDay]
+  );
+
+  /* Alerts and forecast for the selected day. */
+  const dayAlerts = useMemo(
+    () =>
+      (reality?.alerts ?? []).filter(
+        (a) => a.affected_trip_day === selectedDay && a.severity !== "INFO"
+      ),
+    [reality, selectedDay]
+  );
+
+  const tripWideAlerts = useMemo(
+    () =>
+      (reality?.alerts ?? []).filter(
+        (a) => !a.affected_trip_day && a.severity !== "INFO"
+      ),
+    [reality]
+  );
+
+  const weatherSection = reality?.sections.find((s) => s.key === "weather");
+  const trafficSection = reality?.sections.find((s) => s.key === "traffic");
+
+  const dayForecast = useMemo(() => {
+    const forecast: any[] = weatherSection?.details?.forecast ?? [];
+    return forecast.find((f) => f.trip_day === selectedDay) ?? null;
+  }, [weatherSection, selectedDay]);
+
+  const dayTraffic = useMemo(() => {
+    const days: any[] = trafficSection?.details?.days ?? [];
+    return days.find((d) => d.day === selectedDay) ?? null;
+  }, [trafficSection, selectedDay]);
+
+  /** Realistic minutes per stop, keyed by place name. */
+  const realisticByPlace = useMemo(() => {
+    const map = new Map<string, number>();
+    (dayTraffic?.legs ?? []).forEach((leg: any) => {
+      if (leg.to_place) map.set(leg.to_place, leg.realistic_minutes);
+    });
+    return map;
+  }, [dayTraffic]);
+
+  /** Alerts keyed by the stop they name. */
+  const alertsByPlace = useMemo(() => {
+    const map = new Map<string, TravelAlert[]>();
+    dayAlerts.forEach((alert) => {
+      const names = [alert.affected_place, ...(alert.also_affected ?? [])];
+      names.forEach((name) => {
+        if (!name) return;
+        map.set(name, [...(map.get(name) ?? []), alert]);
+      });
+    });
+    return map;
+  }, [dayAlerts]);
+
+  /* Map pins for the selected day only, with affected stops flagged. */
   const mapLocations: MapLocation[] = useMemo(() => {
     const list: MapLocation[] = [];
 
-    // Add current day activities
     if (currentDayData?.activities) {
       currentDayData.activities.forEach((act, idx) => {
-        const catMap: Record<string, "place" | "hotel" | "food" | "activity"> = {
+        if (act.latitude == null || act.longitude == null) return;
+
+        const catMap: Record<string, MapLocation["category"]> = {
           historical: "place",
           culture: "place",
           food: "food",
           nature: "activity",
           adventure: "activity",
           museum: "place",
+          beach: "activity",
         };
-        const cat = catMap[act.category?.toLowerCase()] || "place";
+        const name = act.name || act.place_name || "Attraction";
+        const stopAlerts = alertsByPlace.get(name);
+
         list.push({
           id: `act-${idx}`,
-          name: act.name || act.place_name || "Attraction",
-          category: cat,
-          lat: act.latitude || 17.385 + idx * 0.01,
-          lng: act.longitude || 78.4867 + idx * 0.01,
+          name,
+          category: catMap[act.category?.toLowerCase()] || "place",
+          lat: act.latitude,
+          lng: act.longitude,
           time: act.time,
           cost: act.estimated_cost,
+          affected: Boolean(stopAlerts?.length),
+          affectedReason: stopAlerts?.[0]?.impact ?? undefined,
         });
       });
     }
 
-    // Add hotels as hotel markers
-    if (data?.hotels) {
-      data.hotels.forEach((h, idx) => {
-        list.push({
-          id: `hotel-${idx}`,
-          name: h.name,
-          category: "hotel",
-          lat: h.latitude || 17.39 + idx * 0.01,
-          lng: h.longitude || 78.47 + idx * 0.01,
-          cost: h.price_per_night,
-        });
+    // Hotels are shown alongside the day's stops so the commute is visible.
+    (data?.hotels ?? []).forEach((h, idx) => {
+      if (h.latitude == null || h.longitude == null) return;
+      list.push({
+        id: `hotel-${idx}`,
+        name: h.name,
+        category: "hotel",
+        lat: h.latitude,
+        lng: h.longitude,
+        cost: h.price_per_night,
       });
-    }
+    });
 
     return list;
-  }, [currentDayData, data?.hotels]);
+  }, [currentDayData, data?.hotels, alertsByPlace]);
 
-  if (loading) {
+  /* ------------------------------ Render ------------------------------- */
+  if (loading) return <LoadingShell destination={destinationName} />;
+
+  if (errorMsg && !data) {
     return (
-      <div className="min-h-screen flex flex-col bg-[#fbfbfa]">
+      <div className="flex min-h-screen flex-col bg-[#fbfbfa]">
         <Navbar />
-        <main className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#171717] text-white text-2xl animate-pulse">
-            ✈️
-          </div>
-          <h2 className="mt-6 text-2xl font-bold text-[#171717]">
-            Generating {destinationName} Itinerary...
+        <main className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+          <h2 className="text-xl font-semibold text-[#171717]">
+            We couldn&apos;t build your itinerary
           </h2>
-          <p className="mt-2 text-xs text-gray-500 max-w-sm">
-            Fetching regional attractions, calculating nearest-neighbor routes, and consulting Gemini 3.6 Flash for local tips.
-          </p>
+          <p className="mt-2 max-w-md text-sm text-[#6b6b66]">{errorMsg}</p>
+          <Link
+            href="/planner"
+            className="mt-5 rounded-full bg-[#171717] px-5 py-2.5 text-xs font-semibold text-white"
+          >
+            Back to planner
+          </Link>
         </main>
         <Footer />
       </div>
     );
   }
 
-  const budgetBreakdown = data?.budget_breakdown || {
-    total_budget: tripConfig?.budget || 25000,
-    hotel: Math.round((tripConfig?.budget || 25000) * 0.35),
-    food: Math.round((tripConfig?.budget || 25000) * 0.2),
-    activities: Math.round((tripConfig?.budget || 25000) * 0.2),
-    transport: Math.round((tripConfig?.budget || 25000) * 0.15),
-    emergency_buffer: Math.round((tripConfig?.budget || 25000) * 0.1),
-  };
-
-  const weather = data?.weather || {
-    destination: destinationName,
-    temperature: "29°C",
-    feels_like: "30°C",
-    condition: "Sunny & Pleasant",
-    humidity: "52%",
-    wind_speed: "11 km/h",
-    packing_advice: "Light cotton attire, sunglasses, and comfortable walking sneakers.",
-    best_time_to_explore: "Morning (8:30 AM - 11 AM) & Evening (4:30 PM - 7:30 PM)",
-    is_live: true,
-  };
-
-  const aiInsights = data?.ai_insights || {
-    trip_tagline: `Unveil the Soul of ${destinationName}`,
-    ai_summary: `An immersive journey blending iconic architecture, local culinary discoveries, and scenic landmarks customized to your travel style.`,
-    insider_tips: [
-      "Arrive at popular monuments before 10 AM to enjoy peaceful photography.",
-      "Keep digital payments or small cash ready for local street food stalls.",
-      "Lakeside promenades are best enjoyed during sunset hours.",
-    ],
-    culinary_highlights: ["Authentic regional delicacies", "Artisanal street chai & snacks"],
-    local_etiquette: "Dress respectfully and remove footwear before entering heritage sanctuaries.",
-    ai_powered: false,
-  };
+  const budgetBreakdown = data?.budget_breakdown;
+  const aiInsights = data?.ai_insights;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#fbfbfa] text-[#171717]">
+    <div className="flex min-h-screen flex-col bg-[#fbfbfa] text-[#171717]">
       <Navbar />
 
-      {/* Hero Section */}
-      <section className="mx-auto max-w-[1400px] w-full px-5 pt-5 md:px-8 md:pt-8">
-        <div className="relative min-h-[460px] overflow-hidden rounded-[32px] md:min-h-[520px] shadow-lg">
+      {/* ------------------------------ Hero ------------------------------ */}
+      <section className="mx-auto w-full max-w-[1400px] px-5 pt-5 md:px-8 md:pt-8">
+        <div className="relative min-h-[420px] overflow-hidden rounded-[28px] shadow-lg md:min-h-[480px]">
           <img
             src={heroImage}
             alt={destinationName}
@@ -231,227 +363,327 @@ export default function ItineraryPage() {
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/10" />
 
-          {/* Tag Badges */}
-          <div className="absolute left-6 top-6 flex flex-wrap items-center gap-2 md:left-8 md:top-8">
-            <span className="flex items-center gap-2 rounded-full bg-white/95 px-3.5 py-1.5 text-xs font-bold text-gray-900 shadow-sm backdrop-blur">
-              <span className="h-2 w-2 rounded-full bg-[#d97745]" />
-              AI Route Optimized
-            </span>
-            {aiInsights.ai_powered && (
-              <span className="rounded-full bg-emerald-500/90 px-3 py-1 text-[11px] font-semibold text-white backdrop-blur">
-                Gemini 3.6 Flash Verified
-              </span>
-            )}
-          </div>
-
-          {/* Hero Bottom Information */}
-          <div className="absolute bottom-0 left-0 right-0 p-6 text-white md:p-12">
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#dca17e]">
-              Personalized Journey
+          <div className="absolute bottom-0 left-0 right-0 p-6 text-white md:p-10">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#dca17e]">
+              Your itinerary
             </p>
-            <h1 className="mt-2 text-4xl font-extrabold tracking-tight md:text-6xl">
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight md:text-5xl">
               {destinationName}
             </h1>
-            <p className="mt-2 text-sm italic text-white/90 md:text-base font-medium">
-              "{aiInsights.trip_tagline}"
-            </p>
+            {aiInsights?.trip_tagline && (
+              <p className="mt-2 text-sm font-medium text-white/90 md:text-base">
+                {aiInsights.trip_tagline}
+              </p>
+            )}
 
-            {/* Quick Metrics Bar */}
-            <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-white/90 md:text-sm">
-              <span className="rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur font-medium">
-                📅 {totalDays} Days
+            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-white/85 md:text-sm">
+              <span>{totalDays} days</span>
+              <span>
+                {data?.number_of_travelers || tripConfig?.travelers || 2}{" "}
+                travellers
               </span>
-              <span className="rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur font-medium">
-                👥 {data?.number_of_travelers || tripConfig?.travelers || 2} Travelers
+              <span>
+                ₹
+                {(
+                  data?.total_budget ||
+                  tripConfig?.budget ||
+                  25000
+                ).toLocaleString("en-IN")}
               </span>
-              <span className="rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur font-medium">
-                💰 ₹{(data?.total_budget || tripConfig?.budget || 25000).toLocaleString("en-IN")} Budget
+              <span>
+                {data?.accommodation_preference || tripConfig?.hotel || "Comfort"}{" "}
+                stay
               </span>
-              <span className="rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur font-medium">
-                🏨 {data?.accommodation_preference || tripConfig?.hotel || "Comfort"} Tier
-              </span>
+
+              {reality && (
+                <Link
+                  href="/reality"
+                  className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 backdrop-blur transition hover:bg-white/25"
+                >
+                  <span>Trip readiness</span>
+                  <StatusBadge status={reality.overall_status} />
+                </Link>
+              )}
             </div>
-
-            <p className="mt-4 max-w-2xl text-xs leading-relaxed text-white/80 md:text-sm">
-              {aiInsights.ai_summary}
-            </p>
           </div>
         </div>
       </section>
 
-      {/* Weather & Travel Readiness Strip */}
-      <section className="mx-auto max-w-[1400px] w-full px-5 pt-6 md:px-8">
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-lg">
-              ☀️
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[#999]">
-                Live Destination Climate
+      {/* ------------------ Reality strip (loads separately) --------------- */}
+      <section className="mx-auto w-full max-w-[1400px] px-5 pt-6 md:px-8">
+        {loadingReality && !reality ? (
+          <div className="rounded-2xl border border-black/5 bg-white p-4">
+            <div className="h-3 w-1/3 animate-pulse rounded bg-neutral-100" />
+            <div className="mt-2.5 h-3 w-3/5 animate-pulse rounded bg-neutral-100" />
+          </div>
+        ) : reality ? (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-black/5 bg-white p-4">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8f8f88]">
+                What to expect
               </p>
-              <p className="text-sm font-bold text-[#171717]">
-                {weather.temperature} · {weather.condition} (Feels like {weather.feels_like})
+              <p className="mt-1 max-w-3xl text-sm leading-relaxed text-[#55554f]">
+                {reality.readiness_summary}
               </p>
             </div>
-          </div>
-
-          <div className="hidden items-center gap-6 text-xs text-[#555] lg:flex">
-            <div>
-              <span className="font-semibold text-gray-800">Humidity:</span> {weather.humidity}
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-[#8f8f88]">
+                {relativeTime(reality.last_updated)}
+              </span>
+              <Link
+                href="/reality"
+                className="rounded-full border border-black/15 px-3.5 py-1.5 text-xs font-semibold text-[#171717] transition hover:bg-[#f5f3ee]"
+              >
+                Full Reality Check
+              </Link>
             </div>
-            <div>
-              <span className="font-semibold text-gray-800">Wind:</span> {weather.wind_speed}
-            </div>
-            <div>
-              <span className="font-semibold text-gray-800">Best Window:</span> {weather.best_time_to_explore}
-            </div>
           </div>
-
-          <div className="text-xs text-[#666]">
-            <span className="font-bold text-gray-900">Packing Tip:</span> {weather.packing_advice}
+        ) : (
+          <div className="rounded-2xl border border-dashed border-black/10 bg-[#faf9f7] p-4 text-xs text-[#6b6b66]">
+            Live conditions are temporarily unavailable. Your itinerary below is
+            unaffected.
           </div>
-        </div>
+        )}
       </section>
 
-      {/* Itinerary Timeline + Interactive Map */}
-      <section className="mx-auto max-w-[1400px] w-full px-5 py-8 md:px-8 md:py-12">
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_520px]">
-          
-          {/* LEFT COLUMN: ITINERARY TIMELINE */}
+      {/* ------------------- Trip-wide alerts (cost etc.) ------------------ */}
+      {tripWideAlerts.length > 0 && (
+        <section className="mx-auto w-full max-w-[1400px] px-5 pt-4 md:px-8">
+          <div className="grid gap-3 lg:grid-cols-2">
+            {tripWideAlerts.map((alert) => (
+              <TravelUpdateCard
+                key={alert.id}
+                alert={alert}
+                itinerary={itinerary}
+                destination={destinationName}
+                onConfirmed={handleConfirmed}
+                compact
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* -------------------- Timeline + map ------------------------------ */}
+      <section className="mx-auto w-full max-w-[1400px] px-5 py-8 md:px-8 md:py-12">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_500px]">
+          {/* Left: the plan */}
           <div>
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-black/10 pb-5">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#d97745]">
-                  Day-by-Day Schedule
+                <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#d97745]">
+                  Day-by-day
                 </span>
-                <h2 className="mt-1 text-2xl font-bold tracking-tight md:text-3xl">
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight md:text-3xl">
                   {currentDayData?.title || `Day ${selectedDay}`}
                 </h2>
               </div>
 
-              {/* Transit summary for the day */}
-              {currentDayData?.total_transit_km && (
-                <div className="rounded-full border border-black/10 bg-[#f7f6f2] px-3.5 py-1.5 text-xs font-semibold text-[#555]">
-                  🚗 ~{currentDayData.total_transit_km} km transit ({currentDayData.estimated_transit_minutes} mins)
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {currentDayData?.total_transit_km ? (
+                  <span className="rounded-full border border-black/10 bg-[#f7f6f2] px-3 py-1.5 font-medium text-[#55554f]">
+                    {currentDayData.total_transit_km} km ·{" "}
+                    {currentDayData.estimated_transit_minutes} min planned
+                  </span>
+                ) : null}
+                {dayTraffic && dayTraffic.added_minutes > 0 && (
+                  <span
+                    className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-900"
+                    title="Modelled from typical peak hours, not live traffic"
+                  >
+                    +{dayTraffic.added_minutes} min realistic
+                  </span>
+                )}
+                {dayForecast && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-[#8f8f88]">
+                      {dayForecast.condition}
+                    </span>
+                    <StatusBadge status={dayForecast.outdoor_suitability} />
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* DAY TABS */}
-            <div className="mt-6 flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            {/* Day tabs - these filter the map as well as the list */}
+            <div className="no-scrollbar mt-6 flex gap-2 overflow-x-auto pb-2">
               {Array.from({ length: totalDays }).map((_, idx) => {
                 const dayNum = idx + 1;
                 const active = selectedDay === dayNum;
+                const hasAlert = (reality?.alerts ?? []).some(
+                  (a) => a.affected_trip_day === dayNum && a.severity !== "INFO"
+                );
+
                 return (
                   <button
                     key={dayNum}
                     onClick={() => setSelectedDay(dayNum)}
-                    className={`min-w-[84px] rounded-full px-5 py-2.5 text-xs font-bold transition shadow-xs ${
+                    className={`relative min-w-[84px] rounded-full px-5 py-2.5 text-xs font-semibold transition ${
                       active
-                        ? "bg-[#171717] text-white shadow"
-                        : "bg-white text-[#666] hover:bg-[#eae9e4]"
+                        ? "bg-[#171717] text-white"
+                        : "bg-white text-[#6b6b66] hover:bg-[#eae9e4]"
                     }`}
                   >
                     Day {dayNum}
+                    {hasAlert && (
+                      <span
+                        className="absolute right-3 top-2 h-1.5 w-1.5 rounded-full bg-[#d97745]"
+                        aria-label="Has a travel update"
+                      />
+                    )}
                   </button>
                 );
               })}
             </div>
 
-            {/* ACTIVITIES LIST */}
-            <div className="mt-4 divide-y divide-black/5">
-              {currentDayData?.activities && currentDayData.activities.length > 0 ? (
-                currentDayData.activities.map((act, index) => (
-                  <ItineraryCard
-                    key={`${selectedDay}-${act.name}-${index}`}
-                    activity={act}
-                    dayNumber={selectedDay}
-                    isFirst={index === 0}
+            {/* Alerts for this day */}
+            {dayAlerts.length > 0 && (
+              <div id="day-updates" className="mt-5 scroll-mt-24 space-y-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8f8f88]">
+                  Updates affecting Day {selectedDay}
+                </h3>
+                {dayAlerts.map((alert) => (
+                  <TravelUpdateCard
+                    key={alert.id}
+                    alert={alert}
+                    itinerary={itinerary}
+                    destination={destinationName}
+                    onConfirmed={handleConfirmed}
                   />
-                ))
+                ))}
+              </div>
+            )}
+
+            {/* The stops */}
+            <div className="mt-4">
+              {currentDayData?.activities?.length ? (
+                currentDayData.activities.map((act: ActivityItem, index) => {
+                  const name = act.name || act.place_name || "";
+                  return (
+                    <ItineraryCard
+                      key={`${selectedDay}-${name}-${index}`}
+                      activity={act}
+                      dayNumber={selectedDay}
+                      isFirst={index === 0}
+                      realisticTransitMinutes={
+                        realisticByPlace.get(name) ?? null
+                      }
+                      weatherSuitability={
+                        (dayForecast?.outdoor_suitability as RealityStatus) ??
+                        null
+                      }
+                      weatherNote={dayForecast?.advice?.[0] ?? null}
+                      alerts={alertsByPlace.get(name) ?? []}
+                    />
+                  );
+                })
               ) : (
-                <div className="py-12 text-center text-gray-500 text-xs">
+                <div className="py-12 text-center text-xs text-gray-500">
                   No activities scheduled for Day {selectedDay}.
                 </div>
               )}
             </div>
 
-            {/* AI LOCAL INSIDER TIPS FOR THE DAY */}
-            <div className="mt-8 rounded-2xl border border-black/5 bg-[#f5f3ee] p-5">
-              <div className="flex items-center gap-2 text-xs font-bold text-[#171717]">
-                <span>💡</span>
-                <span>Gemini Local Concierge Tips for {destinationName}</span>
+            {aiInsights?.insider_tips?.length ? (
+              <div className="mt-8 rounded-2xl border border-black/5 bg-[#f5f3ee] p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8f8f88]">
+                  Local tips
+                </p>
+                <ul className="mt-2.5 space-y-1.5">
+                  {aiInsights.insider_tips.map((tip, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2 text-xs leading-relaxed text-[#55554f]"
+                    >
+                      <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[#d97745]" />
+                      <span>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+                {!aiInsights.ai_powered && (
+                  <p className="mt-2.5 text-[10px] text-[#8f8f88]">
+                    General guidance — the AI service was unavailable when this
+                    was generated.
+                  </p>
+                )}
               </div>
-              <ul className="mt-3 space-y-1.5 text-xs text-[#55544f]">
-                {aiInsights.insider_tips.map((tip, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="text-[#d97745] font-bold">•</span>
-                    <span>{tip}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
+            ) : null}
           </div>
 
-          {/* RIGHT COLUMN: STICKY INTERACTIVE MAP */}
+          {/* Right: map, filtered to the selected day */}
           <aside className="lg:sticky lg:top-[96px] lg:h-[calc(100vh-120px)]">
             <div className="h-full min-h-[520px] overflow-hidden rounded-[28px] border border-black/5 bg-white shadow-md">
-              <Map
+              <TripMap
                 destination={destinationName}
                 selectedDay={selectedDay}
                 customLocations={mapLocations}
               />
             </div>
           </aside>
-
         </div>
       </section>
 
-      {/* ONE TOURISM HUB: RECOMMENDED STAYS */}
-      <section className="border-t border-black/5 bg-white py-14">
-        <div className="mx-auto max-w-[1400px] w-full px-5 md:px-8">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#d97745]">
-                One Tourism Hub · Stays
-              </span>
-              <h2 className="mt-1 text-2xl font-bold tracking-tight md:text-3xl">
-                Recommended Stays in {destinationName}
-              </h2>
-              <p className="mt-1 text-xs text-[#666]">
-                Curated accommodations matching your {data?.accommodation_preference || "Comfort"} tier and proximity to attractions.
+      {/* --------------------------- Stays -------------------------------- */}
+      {data?.hotels?.length ? (
+        <section className="border-t border-black/5 bg-white py-14">
+          <div className="mx-auto w-full max-w-[1400px] px-5 md:px-8">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#d97745]">
+                  Stays
+                </span>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight md:text-3xl">
+                  Where to stay in {destinationName}
+                </h2>
+                <p className="mt-1 text-xs text-[#6b6b66]">
+                  Indicative rates, not live booking quotes. See the Reality
+                  Check for distance from your stops.
+                </p>
+              </div>
+              <Link
+                href="/reality#hotel_reality"
+                className="text-xs font-semibold text-[#d97745] hover:underline"
+              >
+                Accommodation reality →
+              </Link>
+            </div>
+
+            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {data.hotels.map((hotel) => (
+                <HotelCard key={hotel.id || hotel.name} hotel={hotel} />
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {/* --------------------------- Budget ------------------------------- */}
+      {budgetBreakdown && (
+        <section className="bg-[#fbfbfa] py-14">
+          <div className="mx-auto w-full max-w-[1400px] px-5 md:px-8">
+            <BudgetCard
+              budget={budgetBreakdown}
+              days={totalDays}
+              travelers={data?.number_of_travelers || tripConfig?.travelers || 2}
+            />
+            <div className="mt-4 rounded-2xl border border-black/5 bg-white p-4">
+              <p className="text-xs text-[#6b6b66]">
+                This is your budget split by category. For a bottom-up estimate
+                of what the plan will actually cost — with every figure labelled
+                — see{" "}
+                <Link
+                  href="/reality#cost_reality"
+                  className="font-semibold text-[#8a5a3b] hover:underline"
+                >
+                  Cost Reality
+                </Link>
+                .
               </p>
             </div>
-            <Link
-              href="/planner"
-              className="text-xs font-bold text-[#d97745] hover:underline"
-            >
-              Change Tier →
-            </Link>
           </div>
+        </section>
+      )}
 
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {(data?.hotels || []).map((hotel) => (
-              <HotelCard key={hotel.id || hotel.name} hotel={hotel} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* DETERMINISTIC SMART BUDGET OPTIMIZER */}
-      <section className="py-14 bg-[#fbfbfa]">
-        <div className="mx-auto max-w-[1400px] w-full px-5 md:px-8">
-          <BudgetCard
-            budget={budgetBreakdown}
-            days={totalDays}
-            travelers={data?.number_of_travelers || tripConfig?.travelers || 2}
-          />
-        </div>
-      </section>
-
-      {/* FLOATING AI TRAVEL ASSISTANT */}
       <AIChat
         tripContext={{
           destination: destinationName,
@@ -459,8 +691,30 @@ export default function ItineraryPage() {
           budget: data?.total_budget || tripConfig?.budget || 25000,
           interests: data?.interests || tripConfig?.interests,
         }}
+        itinerary={itinerary}
+        reality={reality}
       />
 
+      <Footer />
+    </div>
+  );
+}
+
+function LoadingShell({ destination }: { destination: string }) {
+  return (
+    <div className="flex min-h-screen flex-col bg-[#fbfbfa]">
+      <Navbar />
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-10 md:px-8">
+        <div className="h-[420px] animate-pulse rounded-[28px] bg-neutral-100" />
+        <p className="mt-6 text-sm text-[#6b6b66]">
+          Building your {destination} itinerary — scoring attractions and
+          optimising the route between them.
+        </p>
+        <div className="mt-6 space-y-3">
+          <SectionSkeleton />
+          <SectionSkeleton />
+        </div>
+      </main>
       <Footer />
     </div>
   );

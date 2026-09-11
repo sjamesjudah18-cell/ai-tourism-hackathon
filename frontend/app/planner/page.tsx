@@ -76,6 +76,12 @@ export default function PlannerPage() {
   const [budget, setBudget] = useState("25000");
   const [transport, setTransport] = useState("Any");
   const [hotel, setHotel] = useState("Comfort");
+
+  // Both optional, and both feed the reality layer: a start date aligns the
+  // forecast to the actual travel days, and an origin is what makes a
+  // getting-there estimate possible at all.
+  const [startDate, setStartDate] = useState("");
+  const [origin, setOrigin] = useState("");
   const [interests, setInterests] = useState<string[]>([
     "🍜 Food",
     "🎭 Culture",
@@ -133,6 +139,8 @@ export default function PlannerPage() {
       transport,
       accommodation_preference: hotel,
       hotel,
+      start_date: startDate || undefined,
+      origin: origin.trim() || undefined,
     };
 
     // Save locally for instant availability
@@ -159,6 +167,7 @@ export default function PlannerPage() {
         interests: cleanInterests,
         transport_preference: transport,
         accommodation_preference: hotel,
+        start_date: startDate || undefined,
       });
     } catch (error) {
       console.warn("Backend trip save notice:", error);
@@ -243,6 +252,48 @@ export default function PlannerPage() {
                       {city}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Starting city & start date — both optional, both improve the
+                  reality layer rather than the itinerary itself. */}
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
+                    Starting from{" "}
+                    <span className="font-medium normal-case text-[#999]">
+                      (optional)
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    value={origin}
+                    onChange={(e) => setOrigin(e.target.value)}
+                    placeholder="e.g. Bengaluru"
+                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                  />
+                  <p className="mt-1.5 text-[11px] text-[#999]">
+                    Lets us compare how to get there. Without it, travel to the
+                    destination is left out of cost estimates.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
+                    Start date{" "}
+                    <span className="font-medium normal-case text-[#999]">
+                      (optional)
+                    </span>
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                  />
+                  <p className="mt-1.5 text-[11px] text-[#999]">
+                    Aligns the weather forecast to your actual travel days.
+                  </p>
                 </div>
               </div>
 

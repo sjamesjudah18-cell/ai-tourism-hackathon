@@ -83,16 +83,24 @@ export default function Home() {
             
             <div className="inline-flex items-center gap-2 rounded-full border border-[#d97745]/20 bg-[#d97745]/10 px-4 py-1.5 text-xs font-semibold text-[#d97745]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#d97745]" />
-              SIH 2026 Innovation · AI Tourism Ecosystem
+              Travel Reality Intelligence
             </div>
 
-            <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-[#171717] sm:text-6xl md:text-7xl">
-              Plan your entire trip, <br />
-              <span className="text-[#d97745]">powered by AI intelligence.</span>
+            <h1 className="mt-6 text-4xl font-semibold tracking-tight text-[#171717] sm:text-6xl md:text-7xl">
+              You know where you&apos;re going.
+              <br />
+              <span className="text-[#d97745]">
+                Know what to really expect.
+              </span>
             </h1>
 
             <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-[#666660] md:text-lg">
-              One unified platform that personalizes your journey, connects local hotels and businesses, clusters routes to reduce travel time, and deterministically optimizes your travel budget.
+              Most trips don&apos;t go wrong because the itinerary was bad. They
+              go wrong because of rain on the wrong afternoon, an hour lost to
+              traffic, a monument closed on Fridays, or costs nobody budgeted
+              for. We check the conditions against your actual plan — and tell
+              you what we verified, what we estimated, and what we simply
+              don&apos;t know.
             </p>
 
             {/* QUICK SEARCH / PLAN BAR */}
@@ -144,27 +152,81 @@ export default function Home() {
           </div>
         </section>
 
-        {/* STATS & IMPACT (SIH PPT Slide 6) */}
-        <section className="border-y border-black/5 bg-white py-10">
+        {/* WHAT WE ACTUALLY CHECK
+            This replaced a row of impact statistics that were not sourced.
+            A product whose entire promise is "no fabricated data" cannot open
+            with invented numbers, so it now lists the real sources instead. */}
+        <section className="border-y border-black/5 bg-white py-12">
           <div className="mx-auto max-w-[1400px] px-5 md:px-8">
-            <div className="grid grid-cols-2 gap-6 text-center md:grid-cols-4">
+            <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <p className="text-3xl font-extrabold text-[#171717] md:text-4xl">4,286M+</p>
-                <p className="mt-1 text-xs text-[#777]">Domestic Tourist Visits (MoT India)</p>
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[#d97745]">
+                  What we actually check
+                </span>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
+                  Every figure is labelled by where it came from.
+                </h2>
               </div>
-              <div>
-                <p className="text-3xl font-extrabold text-[#171717] md:text-4xl">$263.6B</p>
-                <p className="mt-1 text-xs text-[#777]">Tourism Economic Impact (WTTC)</p>
-              </div>
-              <div>
-                <p className="text-3xl font-extrabold text-[#171717] md:text-4xl">40% Less</p>
-                <p className="mt-1 text-xs text-[#777]">Travel Transit via Route Clustering</p>
-              </div>
-              <div>
-                <p className="text-3xl font-extrabold text-[#171717] md:text-4xl">100%</p>
-                <p className="mt-1 text-xs text-[#777]">Deterministic Budget Adherence</p>
-              </div>
+              <Link
+                href="/reality"
+                className="text-sm font-semibold text-[#171717] hover:underline"
+              >
+                See a Reality Check →
+              </Link>
             </div>
+
+            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                {
+                  label: "Live",
+                  tone: "border-emerald-200 bg-emerald-50 text-emerald-800",
+                  title: "Fetched now",
+                  body: "Weather, forecast, air quality and sea conditions from Open-Meteo. Local disruption reports from published news sources, linked so you can read them yourself.",
+                },
+                {
+                  label: "Estimate",
+                  tone: "border-black/10 bg-white text-[#6b6b66]",
+                  title: "Worked out by us",
+                  body: "Realistic travel time modelled from distance, time of day and city size. We have no live traffic feed, and we never pretend otherwise.",
+                },
+                {
+                  label: "Approx.",
+                  tone: "border-black/10 bg-white text-[#6b6b66]",
+                  title: "Ranges, not quotes",
+                  body: "Costs are given as ranges across stay, food, transport, attractions and a buffer — never as a guaranteed price.",
+                },
+                {
+                  label: "Unavailable",
+                  tone: "border-neutral-200 bg-neutral-100 text-neutral-600",
+                  title: "When we don't know",
+                  body: "If a source is down or the data doesn't exist, we say so. An honest gap is more useful than a confident guess.",
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-[20px] border border-black/5 bg-[#fbfbfa] p-6"
+                >
+                  <span
+                    className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${item.tone}`}
+                  >
+                    {item.label}
+                  </span>
+                  <h3 className="mt-3 text-base font-semibold text-[#171717]">
+                    {item.title}
+                  </h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-[#666]">
+                    {item.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-6 max-w-3xl text-xs leading-relaxed text-[#8f8f88]">
+              When conditions affect a stop on your plan, we tell you what
+              happened, why it matters and the likely impact — then you choose.
+              Keep your plan, or see alternatives. Nothing changes until you
+              confirm it.
+            </p>
           </div>
         </section>
 

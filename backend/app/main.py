@@ -9,6 +9,9 @@ from app.models.hotel import Hotel
 from app.models.trip import Trip
 from app.models.itinerary import Itinerary
 from app.models.review import Review
+from app.models.food_item import FoodItem
+from app.models.travel_alert import TravelAlert
+from app.models.itinerary_change import ItineraryChange
 
 from app.routes.destinations import router as destinations_router
 from app.routes.places import router as places_router
@@ -18,11 +21,14 @@ from app.routes.itinerary import router as itinerary_router
 from app.routes.trips import router as trips_router
 from app.routes.hotels import router as hotels_router
 from app.routes.assistant import router as assistant_router
+from app.routes.reality import router as reality_router
+from app.routes.alerts import router as alerts_router
+from app.routes.notifications import router as notifications_router
 
 app = FastAPI(
-    title="Smart Tourism API",
-    description="AI-Powered Smart Tourism Ecosystem",
-    version="1.0.0"
+    title="AI Tourism API",
+    description="Travel Reality Intelligence - plan with the full picture",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -46,11 +52,14 @@ app.include_router(itinerary_router)
 app.include_router(trips_router)
 app.include_router(hotels_router)
 app.include_router(assistant_router)
+app.include_router(reality_router)
+app.include_router(alerts_router)
+app.include_router(notifications_router)
 
 @app.get("/")
 def root():
     return {
-        "message": "Smart Tourism API is running!"
+        "message": "AI Tourism API is running!"
     }
 
 
