@@ -119,12 +119,14 @@ function MarkerPin({
   marker,
   dimmed,
   selected,
+  index,
   onSelect,
   onHover,
 }: {
   marker: MapMarker;
   dimmed: boolean;
   selected: boolean;
+  index: number;
   onSelect: () => void;
   onHover: (hovering: boolean) => void;
 }) {
@@ -138,45 +140,47 @@ function MarkerPin({
       zIndex={selected ? 100 : dimmed ? 1 : 10}
     >
       <div
-        className="group relative cursor-pointer"
+        className="marker-true-color group relative cursor-pointer animate-marker-in"
+        style={{ ["--d" as string]: `${Math.min(index, 10) * 35}ms` }}
         onMouseEnter={() => onHover(true)}
         onMouseLeave={() => onHover(false)}
-        style={{ opacity: dimmed ? 0.32 : 1, transition: "opacity 240ms" }}
       >
-        {/* Quiet ring for alert-affected stops, rather than a loud red pin */}
-        {marker.affected && !dimmed && (
+        <div style={{ opacity: dimmed ? 0.32 : 1, transition: "opacity 240ms" }}>
+          {/* Quiet ring for alert-affected stops, rather than a loud red pin */}
+          {marker.affected && !dimmed && (
+            <span
+              className="animate-affected-ring absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{ backgroundColor: "#d97706" }}
+              aria-hidden="true"
+            />
+          )}
+
           <span
-            className="animate-affected-ring absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full"
-            style={{ backgroundColor: "#d97706" }}
-            aria-hidden="true"
-          />
-        )}
+            className={`relative flex items-center justify-center rounded-full border-2 border-white shadow-md transition-transform duration-200 group-hover:scale-110 ${
+              selected ? "h-6 w-6" : "h-4 w-4"
+            }`}
+            style={{
+              backgroundColor: color,
+              boxShadow: selected
+                ? `0 0 0 4px ${color}33, 0 2px 8px rgba(0,0,0,0.25)`
+                : undefined,
+            }}
+          >
+            {marker.sequence !== undefined && !dimmed && (
+              <span className="text-[9px] font-bold leading-none text-white">
+                {marker.sequence + 1}
+              </span>
+            )}
+          </span>
 
-        <span
-          className={`relative flex items-center justify-center rounded-full border-2 border-white shadow-md transition-transform duration-200 group-hover:scale-110 ${
-            selected ? "h-6 w-6" : "h-4 w-4"
-          }`}
-          style={{
-            backgroundColor: color,
-            boxShadow: selected
-              ? `0 0 0 4px ${color}33, 0 2px 8px rgba(0,0,0,0.25)`
-              : undefined,
-          }}
-        >
-          {marker.sequence !== undefined && !dimmed && (
-            <span className="text-[9px] font-bold leading-none text-white">
-              {marker.sequence + 1}
-            </span>
-          )}
-        </span>
-
-        {/* Hover label */}
-        <span className="pointer-events-none absolute bottom-7 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#171717] px-2.5 py-1.5 text-[11px] font-medium text-white shadow-lg group-hover:block">
-          {marker.name}
-          {marker.affected && (
-            <span className="ml-1.5 text-amber-300">needs attention</span>
-          )}
-        </span>
+          {/* Hover label */}
+          <span className="pointer-events-none absolute bottom-7 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#171717] px-2.5 py-1.5 text-[11px] font-medium text-white shadow-lg group-hover:block">
+            {marker.name}
+            {marker.affected && (
+              <span className="ml-1.5 text-amber-300">needs attention</span>
+            )}
+          </span>
+        </div>
       </div>
     </AdvancedMarker>
   );
@@ -217,11 +221,13 @@ export default function MapCanvas({
   if (!apiKey) {
     return (
       <div
-        className={`flex items-center justify-center bg-[#eeece7] p-8 text-center ${className}`}
+        className={`flex items-center justify-center bg-[#0e1013] p-8 text-center ${className}`}
       >
         <div>
-          <p className="t-label">Map unavailable</p>
-          <p className="t-body mt-1.5 max-w-xs">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9b9a93]">
+            Map unavailable
+          </p>
+          <p className="mt-1.5 max-w-xs text-sm leading-relaxed text-[#c9c8c2]">
             No Google Maps key is configured, so the map cannot load. Everything
             else on this page works.
           </p>
@@ -232,39 +238,44 @@ export default function MapCanvas({
 
   return (
     <APIProvider apiKey={apiKey}>
-      <div className={`relative h-full w-full overflow-hidden bg-[#e8e6e1] ${className}`}>
-        <GoogleMap
-          defaultCenter={center}
-          defaultZoom={state.viewport?.zoom ?? 11}
-          gestureHandling="greedy"
-          disableDefaultUI
-          mapId="DEMO_MAP_ID"
-          className="h-full w-full"
-          onClick={() => selectMarker(null)}
-        >
-          <ViewportController />
-          <RouteLine />
+      <div className={`relative h-full w-full overflow-hidden bg-[#0e1013] ${className}`}>
+        {/* Only the tile layer + markers are inverted — the chrome around it
+            (empty state, pills, zoom controls) is styled dark directly. */}
+        <div className="map-tiles-dark h-full w-full">
+          <GoogleMap
+            defaultCenter={center}
+            defaultZoom={state.viewport?.zoom ?? 11}
+            gestureHandling="greedy"
+            disableDefaultUI
+            mapId="DEMO_MAP_ID"
+            className="h-full w-full"
+            onClick={() => selectMarker(null)}
+          >
+            <ViewportController />
+            <RouteLine />
 
-          {renderedMarkers.map((marker) => (
-            <MarkerPin
-              key={marker.id}
-              marker={marker}
-              dimmed={marker.dimmed}
-              selected={state.selectedMarkerId === marker.id}
-              onSelect={() => selectMarker(marker.id)}
-              onHover={(hovering) => hoverMarker(hovering ? marker.id : null)}
-            />
-          ))}
-        </GoogleMap>
+            {renderedMarkers.map((marker, index) => (
+              <MarkerPin
+                key={marker.id}
+                marker={marker}
+                dimmed={marker.dimmed}
+                selected={state.selectedMarkerId === marker.id}
+                index={index}
+                onSelect={() => selectMarker(marker.id)}
+                onHover={(hovering) => hoverMarker(hovering ? marker.id : null)}
+              />
+            ))}
+          </GoogleMap>
+        </div>
 
         {/* Honest empty state instead of pins from somewhere else */}
         {renderedMarkers.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-            <div className="pointer-events-auto max-w-xs rounded-2xl bg-white/95 px-4 py-3.5 text-center shadow-lg backdrop-blur">
-              <p className="text-sm font-semibold text-[#171717]">
+            <div className="pointer-events-auto max-w-xs rounded-2xl border border-white/10 bg-[#171b1f]/95 px-4 py-3.5 text-center shadow-lg backdrop-blur">
+              <p className="text-sm font-semibold text-[#f2efe9]">
                 Nothing mapped yet
               </p>
-              <p className="t-caption mt-1">
+              <p className="mt-1 text-[11px] leading-relaxed text-[#9b9a93]">
                 {state.destination
                   ? `We don't have mapped coordinates for ${state.destination} yet.`
                   : "Choose a destination to see it on the map."}
@@ -286,8 +297,8 @@ export default function MapCanvas({
                   onClick={() => toggleCategory(category)}
                   className={`rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-sm backdrop-blur transition ${
                     active
-                      ? "bg-[#171717] text-white"
-                      : "bg-white/90 text-[#8f8f88] hover:text-[#171717]"
+                      ? "bg-[#f2efe9] text-[#171717]"
+                      : "bg-black/45 text-[#c9c8c2] hover:text-white"
                   }`}
                 >
                   <span
@@ -321,7 +332,7 @@ function ZoomControls({ onZoom }: { onZoom: (delta: number) => void }) {
   const map = useMap();
 
   return (
-    <div className="absolute bottom-4 right-4 z-10 flex flex-col overflow-hidden rounded-xl border border-black/5 bg-white/95 shadow-sm backdrop-blur">
+    <div className="absolute bottom-4 right-4 z-10 flex flex-col overflow-hidden rounded-xl border border-white/10 bg-[#171b1f]/90 shadow-lg backdrop-blur">
       {[
         { label: "+", delta: 1, title: "Zoom in" },
         { label: "−", delta: -1, title: "Zoom out" },
@@ -336,7 +347,7 @@ function ZoomControls({ onZoom }: { onZoom: (delta: number) => void }) {
             if (map) map.setZoom((map.getZoom() ?? 11) + control.delta);
             onZoom(control.delta);
           }}
-          className="flex h-8 w-8 items-center justify-center text-sm text-[#55554f] transition hover:bg-[#f5f3ee] hover:text-[#171717]"
+          className="flex h-8 w-8 items-center justify-center text-sm text-[#c9c8c2] transition hover:bg-white/10 hover:text-white"
         >
           {control.label}
         </button>

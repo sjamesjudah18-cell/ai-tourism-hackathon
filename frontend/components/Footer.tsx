@@ -1,97 +1,81 @@
 import Link from "next/link";
 
+/**
+ * Editorial close, not a SaaS sitemap.
+ *
+ * The previous footer was a four-column dashboard grid with its own brand name
+ * ("SmartTourism", against "AI Tourism" everywhere else) and links to features
+ * that don't exist ("Local Hotel & Homestay Connect", "Heritage Preservation
+ * Guides"). This says only what's true: what the product actually has, and
+ * where the numbers actually come from — as quiet text, not badges.
+ */
+
+const PRODUCT_LINKS = [
+  { href: "/planner", label: "Plan a trip" },
+  { href: "/itinerary", label: "Itinerary" },
+  { href: "/reality", label: "Reality Check" },
+  { href: "/hotels", label: "Hotels" },
+  { href: "/places", label: "Places" },
+];
+
 export default function Footer() {
   return (
-    <footer className="border-t border-black/10 bg-[#171717] text-[#a0a09a]">
-      <div className="mx-auto max-w-[1400px] px-5 py-16 md:px-8">
-        <div className="grid gap-10 md:grid-cols-4">
-          
-          {/* Col 1: Brand & SIH */}
-          <div className="md:col-span-1">
+    <footer className="border-t border-white/8 bg-[#101316] text-[#8f8f88]">
+      <div className="mx-auto max-w-[1400px] px-5 py-14 md:px-8">
+        <div className="flex flex-wrap items-start justify-between gap-10">
+          <div className="max-w-sm">
             <Link
               href="/"
-              className="text-xl font-bold tracking-tight text-white md:text-2xl"
+              className="text-xl font-semibold tracking-tight text-white"
             >
-              Smart<span className="text-[#d97745]">Tourism</span>
+              AI<span className="text-[#e0935f]"> Tourism</span>
             </Link>
-            <p className="mt-3 text-xs leading-6 text-[#8e8e88]">
-              An AI-powered unified tourism ecosystem connecting travelers with authentic local businesses, smart budgeting, and optimized journeys.
+            <p className="t-body mt-3 max-w-xs text-[#8f8f88]">
+              Real weather, realistic travel time and honest costs, checked
+              against the plan you actually build — not just where to go.
             </p>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/80">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Smart India Hackathon 2026
+          </div>
+
+          <nav className="flex flex-wrap gap-x-10 gap-y-6">
+            <div>
+              <p className="t-label text-[#6b6b66]">Product</p>
+              <ul className="mt-3 space-y-2">
+                {PRODUCT_LINKS.map((link) => (
+                  <li key={link.href}>
+                    <Link
+                      href={link.href}
+                      className="t-body text-[#a8a89f] transition hover:text-white"
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
 
-          {/* Col 2: Core Platform */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white">
-              Platform Features
-            </p>
-            <ul className="mt-4 space-y-2.5 text-xs">
-              <li>
-                <Link href="/planner" className="hover:text-white transition">
-                  AI Trip Planner
-                </Link>
-              </li>
-              <li>
-                <Link href="/itinerary" className="hover:text-white transition">
-                  Day-by-Day Itineraries
-                </Link>
-              </li>
-              <li>
-                <span className="text-[#6e6e68]">Deterministic Budget Optimizer</span>
-              </li>
-              <li>
-                <span className="text-[#6e6e68]">Intelligent Route Clustering</span>
-              </li>
-              <li>
-                <span className="text-[#6e6e68]">Real-time Travel Concierge</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Col 3: Ecosystem Hub */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white">
-              Tourism Ecosystem
-            </p>
-            <ul className="mt-4 space-y-2.5 text-xs">
-              <li>
-                <span className="text-[#6e6e68]">Local Hotel & Homestay Connect</span>
-              </li>
-              <li>
-                <span className="text-[#6e6e68]">Regional Artisans & Street Food</span>
-              </li>
-              <li>
-                <span className="text-[#6e6e68]">Heritage Preservation Guides</span>
-              </li>
-              <li>
-                <span className="text-[#6e6e68]">Sustainable Tourism Promotion</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Col 4: Hackathon Credentials */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white">
-              SIH 2026 Project
-            </p>
-            <div className="mt-4 space-y-2 text-xs">
-              <p><span className="text-white">Team:</span> Travel Warriors</p>
-              <p><span className="text-white">Problem ID:</span> SIH26204</p>
-              <p><span className="text-white">Theme:</span> Travel and Tourism</p>
-              <p className="text-[11px] leading-5 text-[#73736d] pt-2">
-                Referenced with India Tourism Data Portal & WTTC India Economic Impact metrics.
-              </p>
+            <div>
+              <p className="t-label text-[#6b6b66]">Data</p>
+              <ul className="mt-3 max-w-[220px] space-y-2">
+                <li className="t-body text-[#a8a89f]">
+                  Weather, air quality and sea conditions from Open-Meteo
+                </li>
+                <li className="t-body text-[#a8a89f]">
+                  Local disruption reports from published news sources
+                </li>
+              </ul>
             </div>
-          </div>
-
+          </nav>
         </div>
 
-        <div className="mt-12 flex flex-col items-center justify-between border-t border-white/10 pt-8 text-xs text-[#73736d] sm:flex-row">
-          <p>© 2026 SmartTourism Ecosystem · Built for Smart India Hackathon 2026</p>
-          <p className="mt-3 sm:mt-0">Powered by Gemini 3.6 Flash & Open-Meteo</p>
+        <div className="mt-12 flex flex-col gap-2 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <p className="t-caption text-[#6b6b66]">
+            © 2026 AI Tourism. Built for Smart India Hackathon 2026 — Team
+            Travel Warriors, Problem ID SIH26204.
+          </p>
+          <p className="t-caption text-[#6b6b66]">
+            Figures are labelled live, estimated or approximate — never
+            presented as a guarantee.
+          </p>
         </div>
       </div>
     </footer>

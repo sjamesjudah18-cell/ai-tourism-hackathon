@@ -100,7 +100,7 @@ export default function NotificationCenter({ tripId }: { tripId?: number }) {
         onClick={handleOpen}
         aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
         aria-expanded={open}
-        className="relative flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[#55554f] transition hover:bg-[#f5f3ee] hover:text-[#171717]"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-[#c9c8c2] transition hover:bg-white/10 hover:text-white"
       >
         {/* Bell, drawn rather than an emoji, to match the restrained UI */}
         <svg

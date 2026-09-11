@@ -92,7 +92,7 @@ export default function ItineraryCard({
             className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
             onError={(e) => {
               (e.target as HTMLImageElement).src =
-                "https://images.unsplash.com/photo-1590050752117-238cb0fb12b1?auto=format&fit=crop&w=800&q=80";
+                "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=800&q=80";
             }}
           />
           {needsAttention && (

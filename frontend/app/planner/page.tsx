@@ -45,7 +45,7 @@ const FEATURED = [
     transport: "Any",
     hotel: "Comfort",
     image:
-      "https://images.unsplash.com/photo-1600267197423-8c3f1c3f8f6a?auto=format&fit=crop&w=800&q=80",
+      "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e8/Charminar_12032013.jpg/960px-Charminar_12032013.jpg",
   },
   {
     label: "Goa",
@@ -79,12 +79,12 @@ const POPULAR = ["Hyderabad", "Goa", "Jaipur", "New Delhi", "Mumbai", "Kochi"];
 
 /** Image-backed interest selector, replacing the 2x4 toggle grid. */
 const INTERESTS = [
-  { label: "History", image: "https://images.unsplash.com/photo-1590050752117-238cb0fb12b1?auto=format&fit=crop&w=400&q=70" },
+  { label: "History", image: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=400&q=70" },
   { label: "Food", image: "https://images.unsplash.com/photo-1601050690597-df0568f70950?auto=format&fit=crop&w=400&q=70" },
   { label: "Beaches", image: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=400&q=70" },
   { label: "Nature", image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=70" },
   { label: "Photography", image: "https://images.unsplash.com/photo-1452587925148-ce544e77e70d?auto=format&fit=crop&w=400&q=70" },
-  { label: "Culture", image: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=400&q=70" },
+  { label: "Culture", image: "https://images.unsplash.com/photo-1477587458883-47145ed94245?auto=format&fit=crop&w=400&q=70" },
   { label: "Shopping", image: "https://images.unsplash.com/photo-1481437156560-3205f6a55735?auto=format&fit=crop&w=400&q=70" },
   { label: "Adventure", image: "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?auto=format&fit=crop&w=400&q=70" },
 ];
