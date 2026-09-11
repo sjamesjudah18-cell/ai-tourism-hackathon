@@ -109,17 +109,15 @@ def cluster_and_route_itinerary(
     total_needed = number_of_days * slots_per_day
     available = recommended_places[:total_needed]
 
-    # If we have fewer places than slots, loop or reuse top places
-    if len(available) < total_needed and len(recommended_places) > 0:
-        multiplier = (total_needed // len(recommended_places)) + 1
-        available = (recommended_places * multiplier)[:total_needed]
+    # Previously this repeated the top places to fill empty slots, which put
+    # the same stop on two different days. We now spread whatever we genuinely
+    # have across the days instead - a slightly lighter day beats sending
+    # someone to the same place twice.
+    day_buckets = _distribute_evenly(available, number_of_days)
 
-    # Partition sequentially into day buckets
     days_result = []
     for day in range(1, number_of_days + 1):
-        start_idx = (day - 1) * slots_per_day
-        end_idx = start_idx + slots_per_day
-        day_slice = available[start_idx:end_idx]
+        day_slice = day_buckets[day - 1]
 
         optimized_activities = optimize_daily_sequence(day_slice)
 
@@ -142,6 +140,33 @@ def cluster_and_route_itinerary(
         })
 
     return days_result
+
+
+def _distribute_evenly(places: list[dict], number_of_days: int) -> list[list[dict]]:
+    """
+    Splits places across days as evenly as possible, keeping their ranked order.
+
+    With 20 places over 7 days this gives days of 3,3,3,3,3,3,2 rather than six
+    full days and an empty one - so no day of the trip is left blank just
+    because the destination is under-seeded.
+    """
+    if number_of_days <= 0:
+        return []
+    if not places:
+        return [[] for _ in range(number_of_days)]
+
+    base, remainder = divmod(len(places), number_of_days)
+    buckets: list[list[dict]] = []
+    cursor = 0
+
+    for day_index in range(number_of_days):
+        # The first `remainder` days take one extra, so the fullest days come
+        # earlier in the trip while people still have energy for them.
+        size = base + (1 if day_index < remainder else 0)
+        buckets.append(places[cursor:cursor + size])
+        cursor += size
+
+    return buckets
 
 
 def _get_day_theme(day: int, total_days: int) -> str:

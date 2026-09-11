@@ -135,8 +135,19 @@ def get_candidate_places(
             .all()
         )
 
-    if len(db_places) < (number_of_days * 3) and synthetic_factory is not None:
-        return list(db_places) + synthetic_factory(destination_name)
+    if len(db_places) < (number_of_days * 3):
+        # Placeholders must sit around the destination's real coordinates, or
+        # every derived distance and the whole map become nonsense.
+        from app.services.geo_service import resolve_destination
+        from app.services.placeholder_service import build_placeholders
+
+        location = resolve_destination(db, destination_name)
+        placeholders = build_placeholders(
+            destination_name=destination_name,
+            latitude=location["latitude"] if location else 17.3850,
+            longitude=location["longitude"] if location else 78.4867,
+        )
+        return list(db_places) + placeholders
 
     return list(db_places)
 

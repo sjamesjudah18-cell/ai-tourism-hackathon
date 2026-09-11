@@ -1,1 +1,212 @@
 @import "tailwindcss";
+
+/**
+ * Design tokens.
+ *
+ * The palette is deliberately unchanged from before - off-white base,
+ * near-black text, one warm accent. The previous UI's problem was layout
+ * genericness and badge overload, not colour. What is new here is a real
+ * typographic scale and a restricted marker-colour system, so hierarchy and
+ * category are carried by type and space rather than by a wall of pills.
+ */
+
+@theme {
+  /* Surfaces */
+  --color-canvas: #fbfbfa;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f5f3ee;
+  --color-surface-muted: #faf9f7;
+
+  /* Ink */
+  --color-ink: #171717;
+  --color-ink-secondary: #55554f;
+  --color-ink-tertiary: #6b6b66;
+  --color-ink-quaternary: #8f8f88;
+  --color-ink-faint: #b5b5ad;
+
+  /* The single brand accent, used sparingly */
+  --color-accent: #d97745;
+  --color-accent-deep: #8a5a3b;
+  --color-accent-wash: #f3efe9;
+
+  /* Reserved strictly for genuine alert severity */
+  --color-critical: #b91c1c;
+  --color-high: #dc2626;
+  --color-medium: #d97706;
+  --color-low: #0284c7;
+
+  /* Limited marker system - one colour per category, no more */
+  --color-marker-place: #171717;
+  --color-marker-hotel: #6366f1;
+  --color-marker-food: #d97745;
+  --color-marker-activity: #059669;
+  --color-marker-beach: #0891b2;
+  --color-marker-culture: #7c3aed;
+
+  --color-line: rgba(0, 0, 0, 0.08);
+  --color-line-strong: rgba(0, 0, 0, 0.14);
+
+  /* Motion — reinforces state changes, never decorative */
+  --ease-map: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---------------------------- Type scale -------------------------------- */
+
+:root {
+  --font-display: var(--font-serif-display), Georgia, "Times New Roman", serif;
+  --font-ui: var(--font-sans-ui), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/**
+ * Five levels, used consistently. Previously headline, body, badge and
+ * metadata all sat within a few pixels of each other, so the eye had nowhere
+ * to land first.
+ */
+.t-display {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 1.4rem + 3.4vw, 4.25rem);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  font-weight: 400;
+}
+
+.t-headline {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 1.1rem + 1.8vw, 2.6rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+}
+
+.t-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 1rem + 0.5vw, 1.5rem);
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  font-weight: 400;
+}
+
+.t-subtitle {
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  font-weight: 500;
+  color: var(--color-ink-secondary);
+}
+
+.t-body {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--color-ink-secondary);
+}
+
+.t-body-lg {
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--color-ink-secondary);
+}
+
+/** Eyebrow / metadata label. Small-caps text, not a pill. */
+.t-label {
+  font-family: var(--font-ui);
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-quaternary);
+}
+
+.t-caption {
+  font-family: var(--font-ui);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--color-ink-quaternary);
+}
+
+/** Plain metadata - replaces the chips previously used for distance/duration. */
+.t-meta {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------ Motion ---------------------------------- */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/** Quiet ring for alert-affected markers - not a loud colour change. */
+@keyframes affected-ring {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  70%  { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+.animate-rise-in { animation: rise-in 0.32s var(--ease-map) both; }
+.animate-fade-in { animation: fade-in 0.25s ease both; }
+.animate-sheet-up { animation: sheet-up 0.3s var(--ease-map) both; }
+.animate-affected-ring { animation: affected-ring 2.4s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------- Utilities --------------------------------- */
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/** Google's default map chrome is replaced with our own controls. */
+.gm-style-cc,
+.gmnoprint a,
+.gm-style a[href^="https://maps.google.com/maps"] {
+  display: none !important;
+}

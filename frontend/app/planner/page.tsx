@@ -1,74 +1,97 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Navbar from "../../components/Navbar";
-import Footer from "../../components/Footer";
-import { createTrip } from "../../lib/api";
+/**
+ * The planner, as a progressive sequence.
+ *
+ * Previously every field sat in one large white card at uniform visual weight,
+ * so choosing a destination looked exactly as consequential as ticking an
+ * optional start date. It now moves through four weighted steps, with the map
+ * beside it responding as soon as a destination is picked - so the place comes
+ * into focus while you answer rather than only after you submit.
+ *
+ * Every original field is preserved. This is sequencing and visual weight, not
+ * feature removal.
+ */
 
-const PRESETS = [
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import Footer from "../../components/Footer";
+import MapCanvas from "../../components/map/MapCanvas";
+import Navbar from "../../components/Navbar";
+import { Button, Field, Meta, MetaDot, inputClass } from "../../components/ui/Primitives";
+import {
+  fetchDestinations,
+  fetchPlaces,
+  createTrip,
+  type DestinationRow,
+} from "../../lib/api";
+import {
+  fitViewport,
+  toMarkerCategory,
+  useMapState,
+  type MapMarker,
+} from "../../lib/mapStore";
+
+/** Featured trips, with real imagery rather than small bordered chips. */
+const FEATURED = [
   {
-    label: "✨ Hyderabad Benchmark (4 Days · ₹25k)",
+    label: "Hyderabad",
+    tagline: "Heritage, biryani, and the Old City",
     destination: "Hyderabad",
     days: "4",
     travelers: "2",
     budget: "25000",
-    interests: ["🍜 Food", "🎭 Culture", "🎢 Adventure"],
+    interests: ["Food", "Culture", "Adventure"],
     transport: "Any",
     hotel: "Comfort",
+    image:
+      "https://images.unsplash.com/photo-1600267197423-8c3f1c3f8f6a?auto=format&fit=crop&w=800&q=80",
   },
   {
-    label: "🏖️ Goa Coastal Escape (3 Days · ₹20k)",
+    label: "Goa",
+    tagline: "Coastline, Latin quarter, and seafood",
     destination: "Goa",
     days: "3",
     travelers: "2",
     budget: "20000",
-    interests: ["🏖️ Beaches", "🍜 Food", "🎢 Adventure"],
+    interests: ["Beaches", "Food", "Adventure"],
     transport: "Car",
     hotel: "Comfort",
+    image:
+      "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=800&q=80",
   },
   {
-    label: "🏰 Jaipur Royal Heritage (3 Days · ₹18k)",
+    label: "Jaipur",
+    tagline: "Forts, bazaars, and Rajasthani cooking",
     destination: "Jaipur",
     days: "3",
     travelers: "2",
     budget: "18000",
-    interests: ["🏛️ History", "🎭 Culture", "🛍️ Shopping"],
+    interests: ["History", "Culture", "Shopping"],
     transport: "Taxi / Cab",
     hotel: "Budget",
+    image:
+      "https://images.unsplash.com/photo-1599661046827-dacff0c0f09a?auto=format&fit=crop&w=800&q=80",
   },
 ];
 
-const POPULAR_DESTINATIONS = [
-  "Hyderabad",
-  "Goa",
-  "Jaipur",
-  "New Delhi",
-  "Mumbai",
-  "Kochi",
-];
+const POPULAR = ["Hyderabad", "Goa", "Jaipur", "New Delhi", "Mumbai", "Kochi"];
 
-const INTEREST_OPTIONS = [
-  "🏛️ History",
-  "🍜 Food",
-  "🏖️ Beaches",
-  "🏔️ Nature",
-  "📸 Photography",
-  "🎭 Culture",
-  "🛍️ Shopping",
-  "🎢 Adventure",
-];
-
-const GENERATION_STEPS = [
-  "Scoring tourist attractions and regional heritage sites...",
-  "Clustering geographical routes to minimize transit times...",
-  "Optimizing accommodation and daily dining budget...",
-  "Consulting Gemini 3.6 Flash for authentic local insider tips...",
-  "Finalizing your personalized travel blueprint...",
+/** Image-backed interest selector, replacing the 2x4 toggle grid. */
+const INTERESTS = [
+  { label: "History", image: "https://images.unsplash.com/photo-1590050752117-238cb0fb12b1?auto=format&fit=crop&w=400&q=70" },
+  { label: "Food", image: "https://images.unsplash.com/photo-1601050690597-df0568f70950?auto=format&fit=crop&w=400&q=70" },
+  { label: "Beaches", image: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=400&q=70" },
+  { label: "Nature", image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=70" },
+  { label: "Photography", image: "https://images.unsplash.com/photo-1452587925148-ce544e77e70d?auto=format&fit=crop&w=400&q=70" },
+  { label: "Culture", image: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=400&q=70" },
+  { label: "Shopping", image: "https://images.unsplash.com/photo-1481437156560-3205f6a55735?auto=format&fit=crop&w=400&q=70" },
+  { label: "Adventure", image: "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?auto=format&fit=crop&w=400&q=70" },
 ];
 
 export default function PlannerPage() {
   const router = useRouter();
+  const { setDestination: setMapDestination, setMarkers, setViewport } = useMapState();
 
   const [destination, setDestination] = useState("Hyderabad");
   const [days, setDays] = useState("4");
@@ -76,22 +99,69 @@ export default function PlannerPage() {
   const [budget, setBudget] = useState("25000");
   const [transport, setTransport] = useState("Any");
   const [hotel, setHotel] = useState("Comfort");
-
-  // Both optional, and both feed the reality layer: a start date aligns the
-  // forecast to the actual travel days, and an origin is what makes a
-  // getting-there estimate possible at all.
   const [startDate, setStartDate] = useState("");
   const [origin, setOrigin] = useState("");
   const [interests, setInterests] = useState<string[]>([
-    "🍜 Food",
-    "🎭 Culture",
-    "🎢 Adventure",
+    "Food",
+    "Culture",
+    "Adventure",
   ]);
 
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
+  const [destinations, setDestinations] = useState<DestinationRow[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const applyPreset = (preset: (typeof PRESETS)[0]) => {
+  useEffect(() => {
+    (async () => {
+      const rows = await fetchDestinations();
+      if (rows) setDestinations(rows);
+    })();
+  }, []);
+
+  /* The destination coming into focus on the map as it is chosen. */
+  const previewDestination = useCallback(
+    async (name: string) => {
+      setMapDestination(name);
+      const match = destinations.find(
+        (d) => d.name.toLowerCase() === name.trim().toLowerCase()
+      );
+      if (!match) {
+        setMarkers([]);
+        return;
+      }
+
+      if (match.latitude != null && match.longitude != null) {
+        setViewport({ lat: match.latitude, lng: match.longitude, zoom: 11 });
+      }
+
+      const places = await fetchPlaces(match.id);
+      if (!places) return;
+
+      const markers: MapMarker[] = places
+        .filter((p) => p.latitude != null && p.longitude != null)
+        .map((place) => ({
+          id: `preview-${place.id}`,
+          name: place.name,
+          category: toMarkerCategory(place.category),
+          lat: place.latitude as number,
+          lng: place.longitude as number,
+          rating: place.rating ?? undefined,
+          description: place.description ?? undefined,
+        }));
+
+      setMarkers(markers);
+      if (markers.length > 0) setViewport(fitViewport(markers));
+    },
+    [destinations, setMapDestination, setMarkers, setViewport]
+  );
+
+  useEffect(() => {
+    if (destinations.length === 0) return;
+    previewDestination(destination);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destinations]);
+
+  function applyFeatured(preset: (typeof FEATURED)[number]) {
     setDestination(preset.destination);
     setDays(preset.days);
     setTravelers(preset.travelers);
@@ -99,32 +169,29 @@ export default function PlannerPage() {
     setInterests(preset.interests);
     setTransport(preset.transport);
     setHotel(preset.hotel);
-  };
+    previewDestination(preset.destination);
+  }
 
-  const toggleInterest = (interest: string) => {
+  function toggleInterest(interest: string) {
     setInterests((current) =>
       current.includes(interest)
-        ? current.filter((item) => item !== interest)
+        ? current.filter((i) => i !== interest)
         : [...current, interest]
     );
-  };
+  }
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    setError(null);
 
     if (!destination.trim()) {
-      alert("Please enter a destination.");
+      setError("Tell us where you're going.");
       return;
     }
-
     if (!budget || Number(budget) <= 0) {
-      alert("Please enter a valid total budget.");
+      setError("Enter a total budget so we can check whether the plan fits it.");
       return;
     }
-
-    const cleanInterests = interests.map((i) =>
-      i.replace(/^[^\w\s]+/, "").trim()
-    );
 
     const tripData = {
       destination: destination.trim(),
@@ -134,7 +201,7 @@ export default function PlannerPage() {
       number_of_travelers: Number(travelers),
       budget: Number(budget),
       total_budget: Number(budget),
-      interests: cleanInterests,
+      interests,
       transport_preference: transport,
       transport,
       accommodation_preference: hotel,
@@ -143,332 +210,339 @@ export default function PlannerPage() {
       origin: origin.trim() || undefined,
     };
 
-    // Save locally for instant availability
     sessionStorage.setItem("smartTourismTrip", JSON.stringify(tripData));
+    // A fresh plan supersedes any previously stored one.
+    sessionStorage.removeItem("aiTourismItinerary");
 
-    // Show step-by-step loading animation
-    setIsGenerating(true);
-    let step = 0;
-    const interval = setInterval(() => {
-      step++;
-      if (step < GENERATION_STEPS.length) {
-        setLoadingStepIndex(step);
-      }
-    }, 600);
-
-    // Persist to backend
+    setSubmitting(true);
     try {
       await createTrip({
         user_id: 1,
-        destination: destination.trim(),
-        number_of_days: Number(days),
-        total_budget: Number(budget),
-        number_of_travelers: Number(travelers),
-        interests: cleanInterests,
+        destination: tripData.destination,
+        number_of_days: tripData.number_of_days,
+        total_budget: tripData.total_budget,
+        number_of_travelers: tripData.number_of_travelers,
+        interests,
         transport_preference: transport,
         accommodation_preference: hotel,
         start_date: startDate || undefined,
       });
-    } catch (error) {
-      console.warn("Backend trip save notice:", error);
+    } catch {
+      // Saving the trip is a convenience; planning proceeds regardless.
     }
 
-    setTimeout(() => {
-      clearInterval(interval);
-      router.push("/itinerary");
-    }, 2800);
-  };
+    router.push("/itinerary");
+  }
+
+  const stepNumber = useMemo(
+    () => ({
+      destination: "01",
+      basics: "02",
+      interests: "03",
+      refine: "04",
+    }),
+    []
+  );
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#fbfbfa] text-[#171717]">
+    <div className="flex min-h-screen flex-col">
       <Navbar />
 
-      <main className="flex-1 px-5 py-12 md:px-8 md:py-16">
-        <div className="mx-auto max-w-3xl">
-          
-          {/* Header */}
-          <div className="text-center">
-            <span className="inline-flex items-center gap-2 rounded-full border border-[#d97745]/20 bg-[#d97745]/10 px-3.5 py-1 text-xs font-semibold text-[#d97745]">
-              ✨ AI Travel Planner
-            </span>
-            <h1 className="mt-4 text-4xl font-bold tracking-tight text-[#171717] md:text-5xl">
-              Plan your personalized journey
-            </h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-[#6b6b64] md:text-base">
-              Specify your destination, time, and budget. Our recommendation and route optimization algorithms design your complete trip in seconds.
-            </p>
-          </div>
+      <main className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col lg:flex-row">
+        {/* Sequence */}
+        <div className="min-w-0 flex-1 px-5 py-10 md:px-8 lg:w-[56%] lg:max-w-[760px]">
+          <p className="t-label text-[#8a5a3b]">Plan a trip</p>
+          <h1 className="t-display mt-3">Where are you going?</h1>
 
-          {/* Quick Demo Presets */}
-          <div className="mt-8 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[#888880]">
-              Quick Demo Presets
-            </p>
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => applyPreset(preset)}
-                  className="rounded-full border border-black/10 bg-[#f7f6f2] px-3.5 py-1.5 text-xs font-medium text-[#444] transition hover:border-black hover:bg-white"
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <form onSubmit={handleSubmit} className="mt-10 space-y-14">
+            {/* ---------------------- 01 Destination ---------------------- */}
+            <section>
+              <Step number={stepNumber.destination} title="Destination" />
 
-          {/* Form Card */}
-          <div className="mt-6 rounded-[28px] border border-black/5 bg-white p-6 shadow-xl md:p-10">
-            <form onSubmit={handleSubmit} className="space-y-7">
-              
-              {/* Destination */}
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                  📍 Destination City
-                </label>
-                <input
-                  type="text"
-                  value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                  placeholder="e.g. Hyderabad, Goa, Jaipur, Mumbai..."
-                  className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
-                  required
-                />
-                {/* Popular city chips */}
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="text-[11px] text-[#888]">Popular:</span>
-                  {POPULAR_DESTINATIONS.map((city) => (
+              <input
+                type="text"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                onBlur={() => previewDestination(destination)}
+                placeholder="Hyderabad, Goa, Jaipur…"
+                className="mt-5 w-full border-0 border-b border-[rgba(0,0,0,0.14)] bg-transparent px-0 pb-3 text-3xl font-normal tracking-tight text-[#171717] outline-none transition placeholder:text-[#c9c9c2] focus:border-[#171717] md:text-4xl"
+                style={{ fontFamily: "var(--font-display)" }}
+                required
+              />
+
+              <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                {POPULAR.map((city) => (
+                  <button
+                    key={city}
+                    type="button"
+                    onClick={() => {
+                      setDestination(city);
+                      previewDestination(city);
+                    }}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                      destination.toLowerCase() === city.toLowerCase()
+                        ? "bg-[#171717] text-white"
+                        : "text-[#8f8f88] hover:bg-[#f5f3ee] hover:text-[#171717]"
+                    }`}
+                  >
+                    {city}
+                  </button>
+                ))}
+              </div>
+
+              {/* Featured trips, with imagery */}
+              <div className="mt-7">
+                <p className="t-label">Or start from a featured trip</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  {FEATURED.map((preset) => (
                     <button
-                      key={city}
+                      key={preset.label}
                       type="button"
-                      onClick={() => setDestination(city)}
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${
-                        destination.toLowerCase() === city.toLowerCase()
-                          ? "bg-[#171717] text-white"
-                          : "bg-[#eee] text-[#555] hover:bg-[#ddd]"
-                      }`}
+                      onClick={() => applyFeatured(preset)}
+                      className="group overflow-hidden rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white text-left transition hover:border-[rgba(0,0,0,0.2)]"
                     >
-                      {city}
+                      <div className="aspect-[16/10] overflow-hidden bg-[#eeece7]">
+                        <img
+                          src={preset.image}
+                          alt={preset.label}
+                          loading="lazy"
+                          className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                        />
+                      </div>
+                      <div className="p-3">
+                        <p className="t-title text-[15px]">{preset.label}</p>
+                        <p className="t-caption mt-0.5 line-clamp-2">
+                          {preset.tagline}
+                        </p>
+                        <Meta className="mt-1.5 block">
+                          {preset.days} days · ₹
+                          {Number(preset.budget).toLocaleString("en-IN")}
+                        </Meta>
+                      </div>
                     </button>
                   ))}
                 </div>
               </div>
+            </section>
 
-              {/* Starting city & start date — both optional, both improve the
-                  reality layer rather than the itinerary itself. */}
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                    Starting from{" "}
-                    <span className="font-medium normal-case text-[#999]">
-                      (optional)
-                    </span>
-                  </label>
+            {/* ------------------------ 02 Basics ------------------------- */}
+            <section>
+              <Step
+                number={stepNumber.basics}
+                title="The basics"
+                description="How long, how many, and how much."
+              />
+
+              <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                <Field label="Duration">
+                  <select
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                    className={inputClass}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                      <option key={n} value={String(n)}>
+                        {n} day{n === 1 ? "" : "s"}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Travellers">
+                  <select
+                    value={travelers}
+                    onChange={(e) => setTravelers(e.target.value)}
+                    className={inputClass}
+                  >
+                    {[1, 2, 3, 4, 6].map((n) => (
+                      <option key={n} value={String(n)}>
+                        {n} traveller{n === 1 ? "" : "s"}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field
+                  label="Total budget (INR)"
+                  hint="We check the plan against this and tell you honestly if it won't fit."
+                >
                   <input
-                    type="text"
-                    value={origin}
-                    onChange={(e) => setOrigin(e.target.value)}
-                    placeholder="e.g. Bengaluru"
-                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                    type="number"
+                    min={0}
+                    value={budget}
+                    onChange={(e) => setBudget(e.target.value)}
+                    className={inputClass}
                   />
-                  <p className="mt-1.5 text-[11px] text-[#999]">
-                    Lets us compare how to get there. Without it, travel to the
-                    destination is left out of cost estimates.
-                  </p>
-                </div>
+                </Field>
 
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                    Start date{" "}
-                    <span className="font-medium normal-case text-[#999]">
-                      (optional)
-                    </span>
-                  </label>
+                <Field
+                  label="Start date"
+                  optional
+                  hint="Aligns the weather forecast to your actual travel days."
+                >
                   <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                    className={inputClass}
                   />
-                  <p className="mt-1.5 text-[11px] text-[#999]">
-                    Aligns the weather forecast to your actual travel days.
-                  </p>
-                </div>
-              </div>
+                </Field>
 
-              {/* Duration & Travelers */}
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                    📅 Duration
-                  </label>
-                  <select
-                    value={days}
-                    onChange={(e) => setDays(e.target.value)}
-                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                <div className="sm:col-span-2">
+                  <Field
+                    label="Starting from"
+                    optional
+                    hint="Lets us compare how to get there. Without it, travel to the destination is left out of cost estimates."
                   >
-                    <option value="1">1 Day (Quick Stop)</option>
-                    <option value="2">2 Days (Weekend Trip)</option>
-                    <option value="3">3 Days (Long Weekend)</option>
-                    <option value="4">4 Days (Recommended)</option>
-                    <option value="5">5 Days (Immersive)</option>
-                    <option value="7">7 Days (Full Week)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                    👥 Travelers
-                  </label>
-                  <select
-                    value={travelers}
-                    onChange={(e) => setTravelers(e.target.value)}
-                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
-                  >
-                    <option value="1">Solo Traveler (1)</option>
-                    <option value="2">Couple / Duo (2)</option>
-                    <option value="3">Small Group (3)</option>
-                    <option value="4">Family / Friends (4)</option>
-                    <option value="6">Group (6+)</option>
-                  </select>
+                    <input
+                      type="text"
+                      value={origin}
+                      onChange={(e) => setOrigin(e.target.value)}
+                      placeholder="e.g. Bengaluru"
+                      className={inputClass}
+                    />
+                  </Field>
                 </div>
               </div>
+            </section>
 
-              {/* Total Budget */}
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                  💰 Total Trip Budget (INR)
-                </label>
-                <div className="relative mt-2.5">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-gray-500">
-                    ₹
-                  </span>
-                  <input
-                    type="number"
-                    value={budget}
-                    onChange={(e) => setBudget(e.target.value)}
-                    placeholder="e.g. 25000"
-                    min="1000"
-                    step="500"
-                    className="w-full rounded-xl border border-black/15 bg-[#fbfbfa] py-3.5 pl-9 pr-4 text-sm font-semibold outline-none transition focus:border-black focus:bg-white"
-                    required
-                  />
-                </div>
-                <p className="mt-1 text-[11px] text-[#888]">
-                  Our budget optimizer automatically allocates funds across Stay (35%), Food (20%), Activities (20%), Transport (15%), and Reserve (10%).
-                </p>
-              </div>
+            {/* ----------------------- 03 Interests ----------------------- */}
+            <section>
+              <Step
+                number={stepNumber.interests}
+                title="What are you here for?"
+                description="We weight the plan towards whatever you pick."
+              />
 
-              {/* Interests */}
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                  ❤️ What are your interests?
-                </label>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {INTEREST_OPTIONS.map((interest) => {
-                    const active = interests.includes(interest);
-                    return (
-                      <button
-                        key={interest}
-                        type="button"
-                        onClick={() => toggleInterest(interest)}
-                        className={`rounded-xl border py-2.5 px-3 text-xs font-semibold transition ${
-                          active
-                            ? "border-[#171717] bg-[#171717] text-white shadow-sm"
-                            : "border-black/10 bg-[#fbfbfa] text-[#555] hover:border-black/30 hover:bg-white"
+              <div className="mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                {INTERESTS.map((interest) => {
+                  const active = interests.includes(interest.label);
+                  return (
+                    <button
+                      key={interest.label}
+                      type="button"
+                      onClick={() => toggleInterest(interest.label)}
+                      aria-pressed={active}
+                      className={`group relative aspect-[4/3] overflow-hidden rounded-xl transition ${
+                        active
+                          ? "ring-2 ring-[#171717] ring-offset-2 ring-offset-[#fbfbfa]"
+                          : ""
+                      }`}
+                    >
+                      <img
+                        src={interest.image}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      />
+                      <span
+                        className={`absolute inset-0 transition ${
+                          active ? "bg-black/45" : "bg-black/30 group-hover:bg-black/40"
                         }`}
-                      >
-                        {interest}
-                      </button>
-                    );
-                  })}
-                </div>
+                      />
+                      <span className="absolute inset-x-0 bottom-0 p-2.5 text-left text-[13px] font-semibold text-white">
+                        {interest.label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+              <Meta className="mt-3 block">
+                {interests.length} selected
+              </Meta>
+            </section>
 
-              {/* Transport & Stays */}
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                    🚗 Transport Preference
-                  </label>
+            {/* ------------------------ 04 Refine ------------------------- */}
+            <section>
+              <Step
+                number={stepNumber.refine}
+                title="Refine"
+                description="How you'll get around, and where you'll stay."
+              />
+
+              <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                <Field label="Transport preference">
                   <select
                     value={transport}
                     onChange={(e) => setTransport(e.target.value)}
-                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                    className={inputClass}
                   >
-                    <option value="Any">Any Mode (Optimal)</option>
-                    <option value="Taxi / Cab">Taxi / Cab</option>
-                    <option value="Public Transport">Public Transport / Metro</option>
-                    <option value="Car">Self-drive Car</option>
+                    {["Any", "Public transport", "Taxi / Cab", "Car", "Walking"].map(
+                      (option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      )
+                    )}
                   </select>
-                </div>
+                </Field>
 
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-[#555]">
-                    🏨 Accommodation Tier
-                  </label>
+                <Field label="Accommodation">
                   <select
                     value={hotel}
                     onChange={(e) => setHotel(e.target.value)}
-                    className="mt-2.5 w-full rounded-xl border border-black/15 bg-[#fbfbfa] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-black focus:bg-white"
+                    className={inputClass}
                   >
-                    <option value="Comfort">Comfort (3★ - 4★ Hotels)</option>
-                    <option value="Budget">Budget (Clean Inns & Hostels)</option>
-                    <option value="Luxury">Luxury (5★ Heritage Palaces)</option>
+                    {["Budget", "Comfort", "Luxury"].map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
                   </select>
-                </div>
+                </Field>
               </div>
+            </section>
 
-              {/* Submit CTA */}
-              <div className="pt-3">
-                <button
-                  type="submit"
-                  disabled={isGenerating}
-                  className="w-full rounded-xl bg-[#171717] py-4 text-base font-bold text-white shadow-xl transition hover:bg-black hover:shadow-2xl disabled:opacity-50"
-                >
-                  {isGenerating ? "Building Your Itinerary..." : "✨ Create My Trip Blueprint"}
-                </button>
-              </div>
+            {error && (
+              <p className="border-l-2 border-red-400 py-2 pl-3 text-[13px] text-red-800">
+                {error}
+              </p>
+            )}
 
-            </form>
-          </div>
-
+            <div className="border-t border-[rgba(0,0,0,0.08)] pt-7">
+              <Button type="submit" size="lg" disabled={submitting}>
+                {submitting ? "Building your plan…" : "Build my itinerary"}
+              </Button>
+              <p className="t-caption mt-3">
+                We'll generate the plan, then check real conditions against it.
+              </p>
+            </div>
+          </form>
         </div>
+
+        {/* The destination coming into focus */}
+        <aside className="relative hidden lg:block lg:flex-1">
+          <div className="sticky top-[72px] h-[calc(100vh-72px)]">
+            <MapCanvas showCategoryFilter={false} />
+            <div className="pointer-events-none absolute left-4 top-4 rounded-xl bg-white/95 px-3.5 py-2.5 shadow-sm backdrop-blur">
+              <p className="t-label">Previewing</p>
+              <p className="t-title mt-0.5 text-[15px]">{destination || "—"}</p>
+            </div>
+          </div>
+        </aside>
       </main>
 
-      {/* Loading Modal Overlay */}
-      {isGenerating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md px-6">
-          <div className="w-full max-w-md rounded-[28px] bg-white p-8 text-center shadow-2xl animate-scaleUp">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#d97745]/10 text-3xl">
-              ✈️
-            </div>
-            <h3 className="mt-5 text-xl font-bold text-[#171717]">
-              Crafting your {destination} Journey
-            </h3>
-            <p className="mt-2 text-xs font-medium text-[#d97745] min-h-[32px] transition-all">
-              {GENERATION_STEPS[loadingStepIndex]}
-            </p>
-
-            {/* Progress bar */}
-            <div className="mt-6 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-              <div
-                className="h-full rounded-full bg-[#171717] transition-all duration-500 ease-out"
-                style={{
-                  width: `${((loadingStepIndex + 1) / GENERATION_STEPS.length) * 100}%`,
-                }}
-              />
-            </div>
-
-            <p className="mt-4 text-[11px] text-gray-400">
-              Powered by Recommendation Engine, Route Optimizer & Gemini AI
-            </p>
-          </div>
-        </div>
-      )}
-
       <Footer />
+    </div>
+  );
+}
+
+function Step({
+  number,
+  title,
+  description,
+}: {
+  number: string;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="t-caption tabular-nums text-[#c9c9c2]">{number}</span>
+      <div>
+        <h2 className="t-title">{title}</h2>
+        {description && <p className="t-body mt-1">{description}</p>}
+      </div>
     </div>
   );
 }

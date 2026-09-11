@@ -11,6 +11,8 @@ from app.services.budget_service import calculate_trip_budget
 from app.services.hotel_service import get_recommended_hotels
 from app.services.weather_service import get_destination_weather
 from app.services.ai_service import enrich_itinerary_with_ai
+from app.services.geo_service import resolve_destination
+from app.services.placeholder_service import build_placeholders
 
 router = APIRouter(
     prefix="/api/itinerary",
@@ -29,37 +31,27 @@ class ItineraryRequest(BaseModel):
     accommodation_preference: str | None = "Comfort"
 
 
-def _create_synthetic_places(destination_name: str) -> list[dict]:
+def _create_synthetic_places(
+    destination_name: str,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> list:
     """
-    Creates dynamic high-quality place candidates if an unseeded destination is requested.
+    Placeholder stops for a destination we have not fully seeded.
+
+    Delegates to `placeholder_service`, which scatters them around the
+    destination's REAL coordinates. The previous version hardcoded Hyderabad's
+    centre for every destination, which put Goa's filler stops 600 km from its
+    real ones and produced itineraries claiming 554 km of driving per day.
+
+    Falls back to Hyderabad only when coordinates genuinely cannot be resolved,
+    which is also the demo destination.
     """
-    templates = [
-        {"name": f"Historic Old Town & Fort of {destination_name}", "category": "Historical", "rating": 4.7, "price_level": 1, "description": f"The architectural centerpiece and ancient fortifications of {destination_name}."},
-        {"name": f"{destination_name} Heritage Palace & Museum", "category": "Culture", "rating": 4.6, "price_level": 2, "description": f"Grand royal palace exhibiting regional art, royal garments, and weapons."},
-        {"name": f"{destination_name} Traditional Bazaar Walk", "category": "Culture", "rating": 4.5, "price_level": 1, "description": f"Bustling traditional market filled with local textiles, handicrafts, and street snacks."},
-        {"name": f"{destination_name} Panoramic Sunset Point", "category": "Nature", "rating": 4.8, "price_level": 1, "description": f"Elevated viewpoint offering sweeping vistas over the surrounding landscape."},
-        {"name": f"Famous Local Food Trail of {destination_name}", "category": "Food", "rating": 4.7, "price_level": 2, "description": f"Historic food quarter featuring authentic regional delicacies and traditional desserts."},
-        {"name": f"{destination_name} Botanical Sanctuary & Lake", "category": "Nature", "rating": 4.4, "price_level": 1, "description": f"Peaceful lakeside gardens popular for morning nature walks and birdwatching."},
-        {"name": f"{destination_name} Adventure Trail & Gorge", "category": "Adventure", "rating": 4.6, "price_level": 2, "description": f"Outdoor trekking, zip-line, and rock-climbing spot in scenic natural surroundings."},
-        {"name": f"Artisans Guild & Cultural Center", "category": "Culture", "rating": 4.5, "price_level": 1, "description": f"Live workshops showcasing generational weaving, pottery, and folk performances."},
-        {"name": f"Riverside Promenade of {destination_name}", "category": "Nature", "rating": 4.5, "price_level": 1, "description": f"Clean pedestrian promenade ideal for evening strolls and boat excursions."},
-        {"name": f"Night Street Food District", "category": "Food", "rating": 4.6, "price_level": 1, "description": f"Vibrant culinary alley buzzing with live grills, flatbreads, and refreshing beverages."},
-        {"name": f"Sacred Hill Temple Complex", "category": "Historical", "rating": 4.7, "price_level": 1, "description": f"Ancient stone temple complex perched high with centuries-old carvings."},
-        {"name": f"{destination_name} Central Craft Pavilion", "category": "Shopping", "rating": 4.3, "price_level": 2, "description": f"State-empanelled handicraft hub supporting indigenous artisans and weavers."}
-    ]
-
-    class FakePlace:
-        def __init__(self, d, idx):
-            self.id = 1000 + idx
-            self.name = d["name"]
-            self.category = d["category"]
-            self.rating = d["rating"]
-            self.price_level = d["price_level"]
-            self.description = d["description"]
-            self.latitude = 17.3850 + (idx * 0.008)
-            self.longitude = 78.4867 + (idx * 0.008)
-
-    return [FakePlace(t, i) for i, t in enumerate(templates)]
+    return build_placeholders(
+        destination_name=destination_name,
+        latitude=latitude if latitude is not None else 17.3850,
+        longitude=longitude if longitude is not None else 78.4867,
+    )
 
 
 @router.post("/generate")
@@ -123,9 +115,15 @@ def create_itinerary(
             .all()
         )
 
-    # If DB places is less than days * 3, supplement with dynamic fallback places
+    # If we have fewer seeded places than the trip needs, top up with
+    # placeholders anchored to the destination's real coordinates.
     if len(db_places) < (days * 3):
-        synthetic = _create_synthetic_places(destination_str)
+        location = resolve_destination(db, destination_str)
+        synthetic = _create_synthetic_places(
+            destination_str,
+            latitude=location["latitude"] if location else None,
+            longitude=location["longitude"] if location else None,
+        )
         candidate_places = list(db_places) + synthetic
     else:
         candidate_places = list(db_places)

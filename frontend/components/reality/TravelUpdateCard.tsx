@@ -1,39 +1,40 @@
 "use client";
 
 /**
- * The user-controlled itinerary impact flow.
+ * The one alert component.
  *
- * This is the single implementation of the product's central rule: the AI
- * recommends, the traveller decides. Every alert source - weather, traffic,
- * closures, local news, cost - routes through this one component rather than
- * reimplementing the interaction per feature.
+ * Every alert in the product renders through this - itinerary, Reality Check,
+ * notifications. Previously the itinerary showed a day-level alert card AND a
+ * differently-styled nested notice inside the stop card, which meant the same
+ * issue appeared twice in two visual languages on one screen. That duplicate is
+ * gone; stops now only mark that they are affected and point here.
  *
- * The flow is strictly:
+ * The interaction is unchanged and still the product's core rule:
  *
- *   summary   ->  KEEP MY PLAN            -> kept (nothing changes)
- *             ->  SHOW ALTERNATIVES       -> alternatives
- *   alternatives -> pick one              -> confirm
- *                -> cancel                -> summary
- *   confirm   ->  CANCEL                  -> alternatives
- *             ->  CONFIRM CHANGE          -> applied
+ *   summary      → KEEP MY PLAN        → kept (nothing changes)
+ *                → SHOW ALTERNATIVES   → alternatives
+ *   alternatives → pick one            → confirm
+ *   confirm      → CONFIRM CHANGE      → applied
  *
- * Nothing calls the change endpoint except the CONFIRM CHANGE button in the
- * `confirm` step. Selecting an alternative is not consent; only confirming is.
+ * Only the CONFIRM CHANGE button calls the change endpoint. Selecting an
+ * alternative is not consent.
+ *
+ * Visually it is now a left accent rule with no heavy border or shadow, so an
+ * alert reads as a different kind of thing from a content card.
  */
 
 import { useState } from "react";
-import {
-  confirmItineraryChange,
-  fetchAlternatives,
-} from "../../lib/api";
+import { confirmItineraryChange, fetchAlternatives } from "../../lib/api";
 import type { ItineraryDay } from "../../lib/api";
 import type { AlternativeOption, TravelAlert } from "../../types/reality";
 import {
-  ConfidenceChip,
-  SeverityChip,
-  SEVERITY_STYLES,
+  Button,
+  Meta,
+  MetaDot,
+  SeverityBadge,
+  severityStyle,
   relativeTime,
-} from "./RealityPrimitives";
+} from "../ui/Primitives";
 
 type Step = "summary" | "alternatives" | "confirm" | "applied" | "kept";
 
@@ -42,14 +43,12 @@ type TravelUpdateCardProps = {
   itinerary: ItineraryDay[];
   destination: string;
   tripId?: number;
-  /** Called only after a change the traveller explicitly confirmed. */
   onConfirmed?: (
     itinerary: ItineraryDay[],
     change: Record<string, any>,
     alert: TravelAlert
   ) => void;
   onKeep?: (alert: TravelAlert) => void;
-  compact?: boolean;
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -69,7 +68,6 @@ export default function TravelUpdateCard({
   tripId,
   onConfirmed,
   onKeep,
-  compact = false,
 }: TravelUpdateCardProps) {
   const [step, setStep] = useState<Step>("summary");
   const [options, setOptions] = useState<AlternativeOption[]>([]);
@@ -78,7 +76,7 @@ export default function TravelUpdateCard({
   const [error, setError] = useState<string | null>(null);
   const [appliedTo, setAppliedTo] = useState<string | null>(null);
 
-  const severityStyle = SEVERITY_STYLES[alert.severity] ?? SEVERITY_STYLES.INFO;
+  const style = severityStyle(alert.severity);
   const canOfferAlternatives =
     Boolean(alert.affected_trip_day) && Boolean(alert.affected_place);
 
@@ -93,13 +91,10 @@ export default function TravelUpdateCard({
       itinerary,
       limit: 3,
     });
-
     setLoading(false);
 
     if (!response) {
-      setError(
-        "We could not load alternatives just now. Your plan is unchanged."
-      );
+      setError("We couldn't load alternatives just now. Your plan is unchanged.");
       setOptions([]);
       return;
     }
@@ -107,7 +102,7 @@ export default function TravelUpdateCard({
     setOptions(response.options);
     if (response.options.length === 0) {
       setError(
-        "We could not find a suitable alternative for this stop. Your plan is unchanged."
+        "We couldn't find a suitable alternative for this stop. Your plan is unchanged."
       );
     }
   }
@@ -123,7 +118,6 @@ export default function TravelUpdateCard({
 
     setLoading(true);
     setError(null);
-
     try {
       const result = await confirmItineraryChange({
         itinerary,
@@ -141,7 +135,7 @@ export default function TravelUpdateCard({
     } catch (e: any) {
       setError(
         e?.message ||
-          "The change could not be applied. Your plan has not been modified."
+          "The change couldn't be applied. Your plan has not been modified."
       );
       setStep("confirm");
     } finally {
@@ -152,260 +146,244 @@ export default function TravelUpdateCard({
   const detected = relativeTime(alert.detected_at);
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-black/10 bg-white">
-      {/* Severity spine */}
-      <div className={`h-1 w-full ${severityStyle.bar}`} />
+    <article
+      className={`animate-rise-in relative bg-white pl-4 pr-4 py-4 sm:pl-5 sm:pr-5`}
+    >
+      {/* Left accent rule carries severity — no heavy border or shadow */}
+      <span
+        className={`absolute left-0 top-0 h-full w-[3px] rounded-full ${style.rule}`}
+        aria-hidden="true"
+      />
 
-      <div className={compact ? "p-4" : "p-5 md:p-6"}>
-        {/* ---------------------------- Header ---------------------------- */}
-        <div className="flex flex-wrap items-center gap-2">
-          <SeverityChip severity={alert.severity} />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f8f88]">
-            {TYPE_LABELS[alert.type] ?? alert.type}
-          </span>
-          {alert.affected_trip_day && (
-            <span className="rounded-full bg-[#f3efe9] px-2 py-0.5 text-[10px] font-semibold text-[#8a5a3b]">
-              Day {alert.affected_trip_day}
-            </span>
-          )}
-        </div>
-
-        <h3 className="mt-2.5 text-base font-semibold leading-snug tracking-tight text-[#171717] md:text-lg">
-          {alert.title}
-        </h3>
-
-        {/* --------------------------- Summary ---------------------------- */}
-        {step === "summary" && (
-          <div className="mt-3">
-            {/* What happened, and why it matters */}
-            <p className="text-sm leading-relaxed text-[#55554f]">
-              {alert.message}
-            </p>
-
-            {alert.impact && (
-              <div className="mt-3 rounded-xl border border-black/5 bg-[#faf9f7] px-3.5 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f8f88]">
-                  Likely impact
-                </p>
-                <p className="mt-0.5 text-sm font-medium text-[#171717]">
-                  {alert.impact}
-                </p>
-              </div>
-            )}
-
-            {/* Provenance: source, timestamp, confidence */}
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#8f8f88]">
-              {alert.source ? (
-                alert.source_url ? (
-                  <a
-                    href={alert.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline decoration-dotted underline-offset-2 hover:text-[#171717]"
-                  >
-                    Source: {alert.source}
-                  </a>
-                ) : (
-                  <span>Source: {alert.source}</span>
-                )
-              ) : (
-                <span>Modelled by us — not a live feed</span>
-              )}
-              {detected && <span>Detected {detected}</span>}
-              <ConfidenceChip confidence={alert.confidence} />
-            </div>
-
-            {/* The two choices, and only these two */}
-            <div className="mt-4 flex flex-wrap gap-2.5">
-              <button
-                onClick={handleKeep}
-                className="rounded-full border border-black/15 px-4 py-2 text-xs font-semibold text-[#171717] transition hover:bg-[#f5f3ee]"
-              >
-                Keep my plan
-              </button>
-              {canOfferAlternatives && (
-                <button
-                  onClick={handleShowAlternatives}
-                  className="rounded-full bg-[#171717] px-4 py-2 text-xs font-semibold text-white transition hover:bg-black"
-                >
-                  Show alternatives
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ------------------------- Alternatives ------------------------- */}
-        {step === "alternatives" && (
-          <div className="mt-3">
-            <p className="text-sm text-[#55554f]">
-              Replacements for{" "}
-              <span className="font-semibold text-[#171717]">
-                {alert.affected_place}
-              </span>{" "}
-              on Day {alert.affected_trip_day}.
-            </p>
-            <p className="mt-1 text-[11px] text-[#8f8f88]">
-              Suggestions only — your itinerary has not changed.
-            </p>
-
-            {loading && (
-              <div className="mt-3 space-y-2">
-                {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="h-16 animate-pulse rounded-xl bg-neutral-100"
-                  />
-                ))}
-              </div>
-            )}
-
-            {!loading && options.length > 0 && (
-              <ul className="mt-3 space-y-2">
-                {options.map((option) => (
-                  <li key={option.name}>
-                    <button
-                      onClick={() => {
-                        setSelected(option);
-                        setStep("confirm");
-                      }}
-                      className="w-full rounded-xl border border-black/10 bg-white p-3.5 text-left transition hover:border-[#d97745] hover:bg-[#fdfbf9]"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-[#171717]">
-                            {option.name}
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-[#8f8f88]">
-                            {option.category}
-                            {option.distance_from_day_km != null &&
-                              ` · ${option.distance_from_day_km} km from your other stops`}
-                            {option.indoor && " · Mostly indoors"}
-                          </p>
-                        </div>
-                        {option.rating != null && (
-                          <span className="shrink-0 text-xs font-semibold text-[#55554f]">
-                            {option.rating.toFixed(1)}
-                          </span>
-                        )}
-                      </div>
-                      {option.why?.length > 0 && (
-                        <p className="mt-1.5 text-[11px] leading-relaxed text-[#6b6b66]">
-                          {option.why.join(" · ")}
-                        </p>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {error && (
-              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
-                {error}
-              </p>
-            )}
-
-            <div className="mt-4 flex gap-2.5">
-              <button
-                onClick={() => {
-                  setStep("summary");
-                  setError(null);
-                }}
-                className="rounded-full border border-black/15 px-4 py-2 text-xs font-semibold text-[#171717] transition hover:bg-[#f5f3ee]"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleKeep}
-                className="rounded-full px-4 py-2 text-xs font-semibold text-[#8f8f88] transition hover:text-[#171717]"
-              >
-                Keep my plan
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* --------------------------- Confirm ---------------------------- */}
-        {step === "confirm" && selected && (
-          <div className="mt-3">
-            <div className="rounded-xl border border-black/10 bg-[#faf9f7] p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f8f88]">
-                Confirm this change
-              </p>
-              <p className="mt-2 text-sm text-[#171717]">
-                Replace{" "}
-                <span className="font-semibold">{alert.affected_place}</span>{" "}
-                with <span className="font-semibold">{selected.name}</span> on
-                Day {alert.affected_trip_day}?
-              </p>
-              <p className="mt-2 text-[11px] leading-relaxed text-[#6b6b66]">
-                Your itinerary, route, map and budget will update. This is the
-                only action that changes your plan.
-              </p>
-            </div>
-
-            {error && (
-              <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-900">
-                {error}
-              </p>
-            )}
-
-            <div className="mt-4 flex flex-wrap gap-2.5">
-              <button
-                onClick={() => {
-                  setSelected(null);
-                  setStep("alternatives");
-                  setError(null);
-                }}
-                disabled={loading}
-                className="rounded-full border border-black/15 px-4 py-2 text-xs font-semibold text-[#171717] transition hover:bg-[#f5f3ee] disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmChange}
-                disabled={loading}
-                className="rounded-full bg-[#171717] px-4 py-2 text-xs font-semibold text-white transition hover:bg-black disabled:opacity-50"
-              >
-                {loading ? "Applying…" : "Confirm change"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* --------------------------- Applied ---------------------------- */}
-        {step === "applied" && (
-          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-sm font-semibold text-emerald-900">
-              Plan updated
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-emerald-900/80">
-              {alert.affected_place} was replaced with {appliedTo} on Day{" "}
-              {alert.affected_trip_day}. Your route, map and budget have been
-              recalculated.
-            </p>
-          </div>
-        )}
-
-        {/* ----------------------------- Kept ----------------------------- */}
-        {step === "kept" && (
-          <div className="mt-3 rounded-xl border border-black/10 bg-[#faf9f7] p-4">
-            <p className="text-sm font-semibold text-[#171717]">
-              Plan kept as it is
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-[#6b6b66]">
-              Nothing has changed. {alert.impact ? `Worth remembering: ${alert.impact.toLowerCase()}.` : ""}
-            </p>
-            <button
-              onClick={() => setStep("summary")}
-              className="mt-2.5 text-[11px] font-semibold text-[#8a5a3b] underline underline-offset-2"
-            >
-              Reconsider
-            </button>
-          </div>
+      {/* ------------------------------ Header ----------------------------- */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <SeverityBadge severity={alert.severity} />
+        <Meta>{TYPE_LABELS[alert.type] ?? alert.type}</Meta>
+        {alert.affected_trip_day && (
+          <>
+            <MetaDot />
+            <Meta>Day {alert.affected_trip_day}</Meta>
+          </>
         )}
       </div>
+
+      <h3 className="t-title mt-2 text-[#171717]">{alert.title}</h3>
+
+      {/* ------------------------------ Summary ---------------------------- */}
+      {step === "summary" && (
+        <div className="mt-2">
+          <p className="t-body">{alert.message}</p>
+
+          {alert.impact && (
+            <p className="mt-3 text-[13px] leading-relaxed text-[#171717]">
+              <span className="t-label mr-2">Likely impact</span>
+              {alert.impact}
+            </p>
+          )}
+
+          {/* Provenance: source, timestamp, confidence */}
+          <div className="mt-3 flex flex-wrap items-center">
+            {alert.source ? (
+              alert.source_url ? (
+                <a
+                  href={alert.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="t-caption underline decoration-dotted underline-offset-2 hover:text-[#171717]"
+                >
+                  {alert.source}
+                </a>
+              ) : (
+                <span className="t-caption">{alert.source}</span>
+              )
+            ) : (
+              <span className="t-caption">Modelled by us — not a live feed</span>
+            )}
+            {detected && (
+              <>
+                <MetaDot />
+                <span className="t-caption">Detected {detected}</span>
+              </>
+            )}
+            <MetaDot />
+            <span className="t-caption">{alert.confidence} confidence</span>
+          </div>
+
+          {/* Exactly two choices */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={handleKeep}>
+              Keep my plan
+            </Button>
+            {canOfferAlternatives && (
+              <Button size="sm" onClick={handleShowAlternatives}>
+                Show alternatives
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------- Alternatives -------------------------- */}
+      {step === "alternatives" && (
+        <div className="animate-fade-in mt-2">
+          <p className="t-body">
+            Replacements for{" "}
+            <span className="font-semibold text-[#171717]">
+              {alert.affected_place}
+            </span>{" "}
+            on Day {alert.affected_trip_day}.
+          </p>
+          <p className="t-caption mt-1">
+            Suggestions only — your itinerary has not changed.
+          </p>
+
+          {loading && (
+            <div className="mt-3 space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-14 animate-pulse rounded-xl bg-[#f2f0ec]" />
+              ))}
+            </div>
+          )}
+
+          {!loading && options.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {options.map((option) => (
+                <li key={option.name}>
+                  <button
+                    onClick={() => {
+                      setSelected(option);
+                      setStep("confirm");
+                    }}
+                    className="w-full rounded-xl border border-[rgba(0,0,0,0.08)] p-3 text-left transition hover:border-[#d97745] hover:bg-[#fdfbf9]"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="truncate text-[13px] font-semibold text-[#171717]">
+                        {option.name}
+                      </p>
+                      {option.rating != null && (
+                        <Meta className="shrink-0">{option.rating.toFixed(1)}</Meta>
+                      )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center">
+                      <Meta>{option.category}</Meta>
+                      {option.distance_from_day_km != null && (
+                        <>
+                          <MetaDot />
+                          <Meta>{option.distance_from_day_km} km away</Meta>
+                        </>
+                      )}
+                      {option.indoor && (
+                        <>
+                          <MetaDot />
+                          <Meta>Mostly indoors</Meta>
+                        </>
+                      )}
+                    </div>
+                    {option.why?.length > 0 && (
+                      <p className="t-caption mt-1.5">{option.why.join(" · ")}</p>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {error && (
+            <p className="t-caption mt-3 border-l-2 border-amber-400 py-1.5 pl-2.5 text-amber-900">
+              {error}
+            </p>
+          )}
+
+          <div className="mt-4 flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setStep("summary");
+                setError(null);
+              }}
+            >
+              Back
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleKeep}>
+              Keep my plan
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------ Confirm ---------------------------- */}
+      {step === "confirm" && selected && (
+        <div className="animate-fade-in mt-2">
+          <div className="rounded-xl bg-[#faf9f7] p-3.5">
+            <p className="t-label">Confirm this change</p>
+            <p className="mt-2 text-[13px] leading-relaxed text-[#171717]">
+              Replace <span className="font-semibold">{alert.affected_place}</span>{" "}
+              with <span className="font-semibold">{selected.name}</span> on Day{" "}
+              {alert.affected_trip_day}?
+            </p>
+            <p className="t-caption mt-2">
+              Your itinerary, route, map and budget will update. This is the only
+              action that changes your plan.
+            </p>
+          </div>
+
+          {error && (
+            <p className="t-caption mt-3 border-l-2 border-red-400 py-1.5 pl-2.5 text-red-800">
+              {error}
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                setSelected(null);
+                setStep("alternatives");
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" disabled={loading} onClick={handleConfirmChange}>
+              {loading ? "Applying…" : "Confirm change"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------ Applied ---------------------------- */}
+      {step === "applied" && (
+        <div className="animate-fade-in mt-2 border-l-2 border-emerald-400 py-1.5 pl-3">
+          <p className="text-[13px] font-semibold text-emerald-800">Plan updated</p>
+          <p className="t-caption mt-0.5">
+            {alert.affected_place} was replaced with {appliedTo} on Day{" "}
+            {alert.affected_trip_day}. Route, map and budget have been
+            recalculated.
+          </p>
+        </div>
+      )}
+
+      {/* -------------------------------- Kept ----------------------------- */}
+      {step === "kept" && (
+        <div className="animate-fade-in mt-2">
+          <p className="text-[13px] font-semibold text-[#171717]">
+            Plan kept as it is
+          </p>
+          <p className="t-caption mt-0.5">
+            Nothing has changed.
+            {alert.impact ? ` Worth remembering: ${alert.impact.toLowerCase()}.` : ""}
+          </p>
+          <button
+            onClick={() => setStep("summary")}
+            className="mt-2 text-[11px] font-semibold text-[#8a5a3b] underline underline-offset-2"
+          >
+            Reconsider
+          </button>
+        </div>
+      )}
     </article>
   );
 }

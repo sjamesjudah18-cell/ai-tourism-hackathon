@@ -1,22 +1,21 @@
 "use client";
 
 /**
- * Renders one Reality Check category.
+ * One category of the briefing.
  *
- * Every section shows the same four things - status, plain-language summary,
- * practical advice, and provenance - and then a per-category detail body for
- * the things that only make sense for that category (a forecast table, a cost
- * breakdown, dish cards).
+ * Previously each category was a bordered, shadowed card, so eight of them read
+ * as a wall of stat tiles. They are now sections in a long editorial document -
+ * separated by a rule and generous space rather than boxed - with the status as
+ * a dot-and-word mark instead of a badge.
  */
 
 import type { RealitySection as Section } from "../../types/reality";
 import {
-  ConfidenceChip,
-  DataLabelChip,
-  SourceStamp,
-  StatusBadge,
-  UnavailableNotice,
-} from "./RealityPrimitives";
+  ConfidenceNote,
+  SourceLine,
+  StatusMark,
+  UnavailableNote,
+} from "../ui/Primitives";
 
 import CostDetails from "./sections/CostDetails";
 import CultureDetails from "./sections/CultureDetails";
@@ -27,10 +26,7 @@ import TrafficDetails from "./sections/TrafficDetails";
 import TransportDetails from "./sections/TransportDetails";
 import WeatherDetails from "./sections/WeatherDetails";
 
-const DETAIL_RENDERERS: Record<
-  string,
-  (section: Section) => React.ReactNode
-> = {
+const DETAIL_RENDERERS: Record<string, (section: Section) => React.ReactNode> = {
   weather: (s) => <WeatherDetails details={s.details} />,
   traffic: (s) => <TrafficDetails details={s.details} />,
   local_updates: (s) => <LocalUpdatesDetails details={s.details} />,
@@ -41,11 +37,17 @@ const DETAIL_RENDERERS: Record<
   local_culture: (s) => <CultureDetails details={s.details} />,
 };
 
-export default function RealitySectionCard({ section }: { section: Section }) {
+export default function RealitySectionBlock({
+  section,
+  index,
+}: {
+  section: Section;
+  index: number;
+}) {
   if (!section.available) {
     return (
-      <section id={section.key} className="scroll-mt-24">
-        <UnavailableNotice
+      <section id={section.key} className="scroll-mt-24 py-8">
+        <UnavailableNote
           title={section.title}
           reason={
             section.unavailable_reason ??
@@ -61,76 +63,48 @@ export default function RealitySectionCard({ section }: { section: Section }) {
   return (
     <section
       id={section.key}
-      className="scroll-mt-24 rounded-2xl border border-black/5 bg-white"
+      className="scroll-mt-24 border-t border-[rgba(0,0,0,0.08)] py-9 first:border-t-0"
     >
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-black/5 px-5 py-4 md:px-6 md:py-5">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold tracking-tight text-[#171717] md:text-xl">
-            {section.title}
-          </h2>
-          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[#55554f]">
+      {/* Numbered like a briefing, not titled like a widget */}
+      <div className="flex items-baseline gap-3">
+        <span className="t-caption tabular-nums text-[#c9c9c2]">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h2 className="t-title text-[#171717]">{section.title}</h2>
+            <StatusMark status={section.status} />
+            <ConfidenceNote confidence={section.confidence} />
+          </div>
+
+          {/* The lead paragraph does the work a stat tile used to */}
+          <p className="t-body-lg mt-3 max-w-2xl text-[#2f2f2b]">
             {section.summary}
           </p>
+
+          {section.advice.length > 0 && (
+            <ul className="mt-4 max-w-2xl space-y-2">
+              {section.advice.map((tip, i) => (
+                <li key={i} className="flex gap-3">
+                  <span
+                    className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-[#d97745]"
+                    aria-hidden="true"
+                  />
+                  <span className="t-body">{tip}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {renderDetails && <div className="mt-6">{renderDetails(section)}</div>}
+
+          <SourceLine
+            sources={section.sources}
+            lastUpdated={section.last_updated}
+            className="mt-5"
+          />
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <StatusBadge status={section.status} />
-          <ConfidenceChip confidence={section.confidence} />
-        </div>
-      </header>
-
-      <div className="px-5 py-4 md:px-6 md:py-5">
-        {section.advice.length > 0 && (
-          <ul className="space-y-2">
-            {section.advice.map((tip, index) => (
-              <li key={index} className="flex gap-2.5 text-sm text-[#55554f]">
-                <span
-                  className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[#d97745]"
-                  aria-hidden="true"
-                />
-                <span className="leading-relaxed">{tip}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {renderDetails && (
-          <div className="mt-5 border-t border-black/5 pt-5">
-            {renderDetails(section)}
-          </div>
-        )}
-
-        <SourceStamp
-          sources={section.sources}
-          lastUpdated={section.last_updated}
-          className="mt-5 border-t border-black/5 pt-3.5"
-        />
       </div>
     </section>
-  );
-}
-
-/** Small helper reused by several detail bodies for a labelled figure. */
-export function Figure({
-  label,
-  value,
-  dataLabel,
-  note,
-}: {
-  label: string;
-  value: React.ReactNode;
-  dataLabel?: Parameters<typeof DataLabelChip>[0]["label"];
-  note?: string | null;
-}) {
-  return (
-    <div className="rounded-xl border border-black/5 bg-[#faf9f7] px-3.5 py-3">
-      <div className="flex items-center gap-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f8f88]">
-          {label}
-        </p>
-        {dataLabel && <DataLabelChip label={dataLabel} />}
-      </div>
-      <p className="mt-1 text-base font-semibold text-[#171717]">{value}</p>
-      {note && <p className="mt-0.5 text-[11px] text-[#8f8f88]">{note}</p>}
-    </div>
   );
 }

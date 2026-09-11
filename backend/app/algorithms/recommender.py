@@ -123,7 +123,10 @@ def recommend_places(
             "description": place.description,
             "latitude": place.latitude,
             "longitude": place.longitude,
-            "recommendation_score": score
+            "recommendation_score": score,
+            # Placeholder stops carry this through so the UI can label them as
+            # suggested areas rather than venues we have verified.
+            "is_placeholder": getattr(place, "is_placeholder", False)
         })
 
     recommendations.sort(

@@ -264,6 +264,59 @@ export async function fetchLocalUpdates(destination: string) {
   );
 }
 
+/* ------------------- Destinations, places, hotels ---------------------- */
+
+export type DestinationRow = {
+  id: number;
+  name: string;
+  country: string;
+  state?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  description?: string | null;
+};
+
+export type PlaceRow = {
+  id: number;
+  destination_id: number;
+  name: string;
+  category: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  rating?: number | null;
+  price_level?: number | null;
+  description?: string | null;
+};
+
+export async function fetchDestinations(): Promise<DestinationRow[] | null> {
+  return safeJson<DestinationRow[]>(`${API_URL}/api/destinations/`);
+}
+
+export async function fetchPlaces(
+  destinationId: number
+): Promise<PlaceRow[] | null> {
+  return safeJson<PlaceRow[]>(
+    `${API_URL}/api/places/?destination_id=${destinationId}`
+  );
+}
+
+export async function fetchHotels(params: {
+  destination: string;
+  preference?: string;
+  days?: number;
+  limit?: number;
+}): Promise<{ hotels: HotelItem[]; count: number } | null> {
+  const query = new URLSearchParams({
+    destination: params.destination,
+    preference: params.preference ?? "Comfort",
+    days: String(params.days ?? 3),
+    limit: String(params.limit ?? 12),
+  });
+  return safeJson<{ hotels: HotelItem[]; count: number }>(
+    `${API_URL}/api/hotels/?${query.toString()}`
+  );
+}
+
 /* ---------------------------- Alerts ---------------------------------- */
 
 export async function evaluateAlerts(params: {

@@ -90,7 +90,8 @@ def generate_itinerary(
             "longitude": p.get("longitude"),
             "description": p.get("description", ""),
             "image": get_place_image(p.get("name", ""), cat),
-            "recommendation_score": p.get("recommendation_score", 85)
+            "recommendation_score": p.get("recommendation_score", 85),
+            "is_placeholder": p.get("is_placeholder", False)
         })
 
     # Apply geographic route optimization and clustering
