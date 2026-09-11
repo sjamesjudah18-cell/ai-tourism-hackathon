@@ -10,6 +10,8 @@ const NAV_LINKS = [
   { href: "/planner", label: "Plan" },
   { href: "/itinerary", label: "Itinerary" },
   { href: "/reality", label: "Reality Check" },
+  { href: "/hotels", label: "Hotels" },
+  { href: "/places", label: "Places" },
 ];
 
 export default function Navbar() {

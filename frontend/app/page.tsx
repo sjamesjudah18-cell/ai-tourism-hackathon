@@ -1,227 +1,316 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Home.
+ *
+ * The previous version was a textbook centered-hero template — pill badge,
+ * centered H1, centered search bar, text links below — with no map presence
+ * despite the map being the product's core interaction, and an emoji-icon
+ * feature grid that read as a generic dashboard rather than a travel product.
+ *
+ * The map is now IN the hero, driven by the same shared store every other page
+ * reads from: typing or picking a destination flies it there live, so the
+ * first thing a visitor does is point at a place rather than read about one.
+ * The honest four-column provenance section is kept — it was already the
+ * strongest part of the page — just given room to breathe. The emoji-card
+ * feature grid and the "Smart India Hackathon 2026" CTA block are gone;
+ * destinations are now one imagery-forward section, not two competing grids.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import MapCanvas from "../components/map/MapCanvas";
+import Navbar from "../components/Navbar";
+import { Button, Meta, MetaDot, ProvenanceBadge } from "../components/ui/Primitives";
+import { fetchDestinations, fetchPlaces, type DestinationRow } from "../lib/api";
+import {
+  fitViewport,
+  toMarkerCategory,
+  useMapState,
+  type MapMarker,
+} from "../lib/mapStore";
 
-const POPULAR_DESTINATIONS = [
+/** Featured trips — matches the planner's presets, since clicking one leads there. */
+const FEATURED = [
   {
     name: "Hyderabad",
     state: "Telangana",
-    tag: "Heritage & Biryani Capital",
+    tag: "Heritage, biryani and the Old City",
     image:
-      "https://images.unsplash.com/photo-1600267197423-8c3f1c3f8f6a?auto=format&fit=crop&w=800&q=80",
-    days: "4 Days",
-    estBudget: "₹25,000",
-    highlights: ["Charminar", "Golconda Fort", "Paradise Dum Biryani"],
+      "https://images.unsplash.com/photo-1600267197423-8c3f1c3f8f6a?auto=format&fit=crop&w=900&q=80",
+    days: "4",
+    budget: "25000",
+    interests: ["Food", "Culture", "Adventure"],
+    hotel: "Comfort",
   },
   {
     name: "Goa",
     state: "Goa",
-    tag: "Sun, Sand & Latin Quarters",
+    tag: "Coastline, Latin Quarter and seafood",
     image:
-      "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=800&q=80",
-    days: "3 Days",
-    estBudget: "₹20,000",
-    highlights: ["Baga Beach", "Dudhsagar Falls", "Fontainhas"],
+      "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=900&q=80",
+    days: "3",
+    budget: "20000",
+    interests: ["Beaches", "Food", "Adventure"],
+    hotel: "Comfort",
   },
   {
     name: "Jaipur",
     state: "Rajasthan",
-    tag: "The Pink City & Fortresses",
+    tag: "Forts, bazaars and Rajasthani cooking",
     image:
-      "https://images.unsplash.com/photo-1599661046827-dacff0c0f09a?auto=format&fit=crop&w=800&q=80",
-    days: "3 Days",
-    estBudget: "₹18,000",
-    highlights: ["Amber Fort", "Hawa Mahal", "Johari Bazaar"],
+      "https://images.unsplash.com/photo-1599661046827-dacff0c0f09a?auto=format&fit=crop&w=900&q=80",
+    days: "3",
+    budget: "18000",
+    interests: ["History", "Culture", "Shopping"],
+    hotel: "Budget",
   },
   {
     name: "Mumbai",
     state: "Maharashtra",
-    tag: "The City of Dreams & Sea Breeze",
+    tag: "Sea Link, Marine Drive and Colaba",
     image:
-      "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?auto=format&fit=crop&w=800&q=80",
-    days: "3 Days",
-    estBudget: "₹22,000",
-    highlights: ["Gateway of India", "Marine Drive", "Colaba"],
+      "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?auto=format&fit=crop&w=900&q=80",
+    days: "3",
+    budget: "22000",
+    interests: ["Culture", "Food", "History"],
+    hotel: "Comfort",
+  },
+];
+
+const PROVENANCE_COLUMNS = [
+  {
+    label: "LIVE" as const,
+    title: "Fetched now",
+    body: "Weather, forecast, air quality and sea conditions from Open-Meteo. Local disruption reports from published news sources, linked so you can read them yourself.",
+  },
+  {
+    label: "ESTIMATE" as const,
+    title: "Worked out by us",
+    body: "Realistic travel time modelled from distance, time of day and city size. We have no live traffic feed, and we never pretend otherwise.",
+  },
+  {
+    label: "APPROXIMATE" as const,
+    title: "Ranges, not quotes",
+    body: "Costs are given as ranges across stay, food, transport, attractions and a buffer — never as a guaranteed price.",
+  },
+  {
+    label: "UNAVAILABLE" as const,
+    title: "When we don't know",
+    body: "If a source is down or the data doesn't exist, we say so. An honest gap is more useful than a confident guess.",
   },
 ];
 
 export default function Home() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    setDestination: setMapDestination,
+    setMarkers,
+    setViewport,
+  } = useMapState();
 
-  const handleQuickPlan = (destinationName?: string) => {
-    const dest = destinationName || searchQuery.trim() || "Hyderabad";
-    const trip = {
-      destination: dest,
-      days: 4,
-      number_of_days: 4,
-      travelers: 2,
-      number_of_travelers: 2,
-      budget: 25000,
-      total_budget: 25000,
-      interests: ["Food", "Culture", "Adventure"],
-      transport: "Any",
-      hotel: "Comfort",
-    };
-    sessionStorage.setItem("smartTourismTrip", JSON.stringify(trip));
-    router.push("/planner");
-  };
+  const [searchQuery, setSearchQuery] = useState("");
+  const [destinations, setDestinations] = useState<DestinationRow[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const rows = await fetchDestinations();
+      if (rows) setDestinations(rows);
+    })();
+  }, []);
+
+  /** Live map response as soon as a real destination is recognised. */
+  const previewDestination = useCallback(
+    async (name: string) => {
+      const match = destinations.find(
+        (d) => d.name.toLowerCase() === name.trim().toLowerCase()
+      );
+      if (!match) return;
+
+      setMapDestination(match.name);
+      if (match.latitude != null && match.longitude != null) {
+        setViewport({ lat: match.latitude, lng: match.longitude, zoom: 11 });
+      }
+
+      const places = await fetchPlaces(match.id);
+      if (!places) return;
+
+      const markers: MapMarker[] = places
+        .filter((p) => p.latitude != null && p.longitude != null)
+        .map((place) => ({
+          id: `home-preview-${place.id}`,
+          name: place.name,
+          category: toMarkerCategory(place.category),
+          lat: place.latitude as number,
+          lng: place.longitude as number,
+          rating: place.rating ?? undefined,
+        }));
+      setMarkers(markers);
+      if (markers.length > 0) setViewport(fitViewport(markers));
+    },
+    [destinations, setMapDestination, setMarkers, setViewport]
+  );
+
+  // Preview the default destination as soon as the list resolves, so the map
+  // is never empty on first paint.
+  useEffect(() => {
+    if (destinations.length > 0) previewDestination("Hyderabad");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destinations]);
+
+  const handleQuickPlan = useCallback(
+    (preset?: (typeof FEATURED)[number]) => {
+      const trip = preset
+        ? {
+            destination: preset.name,
+            days: Number(preset.days),
+            number_of_days: Number(preset.days),
+            travelers: 2,
+            number_of_travelers: 2,
+            budget: Number(preset.budget),
+            total_budget: Number(preset.budget),
+            interests: preset.interests,
+            transport: "Any",
+            hotel: preset.hotel,
+          }
+        : {
+            destination: searchQuery.trim() || "Hyderabad",
+            days: 4,
+            number_of_days: 4,
+            travelers: 2,
+            number_of_travelers: 2,
+            budget: 25000,
+            total_budget: 25000,
+            interests: ["Food", "Culture", "Adventure"],
+            transport: "Any",
+            hotel: "Comfort",
+          };
+
+      sessionStorage.setItem("smartTourismTrip", JSON.stringify(trip));
+      router.push("/planner");
+    },
+    [searchQuery, router]
+  );
+
+  const heroDestinationLabel = useMemo(
+    () => searchQuery.trim() || "Hyderabad",
+    [searchQuery]
+  );
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#fbfbfa] text-[#171717]">
+    <div className="flex min-h-screen flex-col">
       <Navbar />
 
       <main className="flex-1">
-        
-        {/* HERO SECTION */}
-        <section className="relative overflow-hidden px-5 pt-12 pb-20 md:px-8 md:pt-20 md:pb-28">
-          <div className="mx-auto max-w-5xl text-center">
-            
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#d97745]/20 bg-[#d97745]/10 px-4 py-1.5 text-xs font-semibold text-[#d97745]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#d97745]" />
-              Travel Reality Intelligence
-            </div>
+        {/* ------------------------------- Hero -------------------------------
+            The map is IN the hero, not absent from the page. Typing a real
+            destination flies the shared canvas there live. */}
+        <section className="border-b border-[rgba(0,0,0,0.08)]">
+          <div className="mx-auto flex w-full max-w-[1600px] flex-col lg:flex-row">
+            {/* Copy + search */}
+            <div className="flex flex-1 flex-col justify-center px-5 py-14 md:px-8 md:py-20 lg:w-[46%] lg:max-w-[620px]">
+              <p className="t-label text-[#8a5a3b]">Travel Reality Intelligence</p>
 
-            <h1 className="mt-6 text-4xl font-semibold tracking-tight text-[#171717] sm:text-6xl md:text-7xl">
-              You know where you&apos;re going.
-              <br />
-              <span className="text-[#d97745]">
-                Know what to really expect.
-              </span>
-            </h1>
+              <h1 className="t-display mt-4">
+                You know where you&apos;re going.
+                <br />
+                <span className="text-[#d97745]">Know what to really expect.</span>
+              </h1>
 
-            <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-[#666660] md:text-lg">
-              Most trips don&apos;t go wrong because the itinerary was bad. They
-              go wrong because of rain on the wrong afternoon, an hour lost to
-              traffic, a monument closed on Fridays, or costs nobody budgeted
-              for. We check the conditions against your actual plan — and tell
-              you what we verified, what we estimated, and what we simply
-              don&apos;t know.
-            </p>
+              <p className="t-body-lg mt-6 max-w-lg">
+                Most trips don&apos;t go wrong because the itinerary was bad. They
+                go wrong because of rain on the wrong afternoon, an hour lost to
+                traffic, or costs nobody budgeted for. We check real conditions
+                against your actual plan — and tell you what we verified, what
+                we estimated, and what we simply don&apos;t know.
+              </p>
 
-            {/* QUICK SEARCH / PLAN BAR */}
-            <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-black/10 bg-white p-2.5 shadow-xl transition-shadow hover:shadow-2xl">
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleQuickPlan();
+                }}
+                className="mt-8 flex flex-col gap-2 rounded-2xl border border-[rgba(0,0,0,0.1)] bg-white p-2 shadow-sm sm:flex-row"
+              >
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Where do you want to explore? (e.g. Hyderabad, Goa, Jaipur)"
-                  className="flex-1 rounded-xl bg-transparent px-4 py-3 text-sm font-medium outline-none placeholder:text-gray-400"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleQuickPlan();
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    if (e.target.value.trim()) previewDestination(e.target.value);
                   }}
+                  placeholder="Where do you want to explore?"
+                  className="flex-1 rounded-xl bg-transparent px-3.5 py-3 text-sm outline-none placeholder:text-[#b5b5ad]"
                 />
-                <button
-                  onClick={() => handleQuickPlan()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#171717] px-7 py-3.5 text-sm font-bold text-white shadow transition hover:bg-black"
-                >
-                  <span>Plan My Trip</span>
-                  <span>→</span>
-                </button>
+                <Button type="submit" size="md">
+                  Plan my trip →
+                </Button>
+              </form>
+
+              <div className="mt-4 flex flex-wrap items-center">
+                <Meta>Try</Meta>
+                <MetaDot />
+                {FEATURED.slice(0, 3).map((preset, i) => (
+                  <span key={preset.name}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery(preset.name);
+                        previewDestination(preset.name);
+                      }}
+                      className="t-meta font-semibold text-[#8a5a3b] hover:underline"
+                    >
+                      {preset.name}
+                    </button>
+                    {i < 2 && <MetaDot />}
+                  </span>
+                ))}
               </div>
             </div>
 
-            {/* Quick Demo Pill Triggers */}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs">
-              <span className="text-[#888]">Demo Benchmark:</span>
-              <button
-                onClick={() => handleQuickPlan("Hyderabad")}
-                className="rounded-full border border-[#d97745]/30 bg-[#d97745]/5 px-3 py-1 font-semibold text-[#d97745] hover:bg-[#d97745]/10 transition"
-              >
-                ✨ Hyderabad (4 Days · ₹25k)
-              </button>
-              <button
-                onClick={() => handleQuickPlan("Goa")}
-                className="rounded-full border border-black/10 bg-white px-3 py-1 font-medium text-[#555] hover:border-black transition"
-              >
-                Goa (3 Days · ₹20k)
-              </button>
-              <button
-                onClick={() => handleQuickPlan("Jaipur")}
-                className="rounded-full border border-black/10 bg-white px-3 py-1 font-medium text-[#555] hover:border-black transition"
-              >
-                Jaipur (3 Days · ₹18k)
-              </button>
+            {/* The live map — hidden on small screens in favour of the
+                imagery-forward destination cards further down the page. */}
+            <div className="relative hidden h-[calc(100vh-72px)] lg:block lg:flex-1">
+              <MapCanvas showCategoryFilter={false} />
+              <div className="pointer-events-none absolute left-5 top-5 rounded-xl bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+                <p className="t-label">Previewing</p>
+                <p className="t-title mt-0.5 text-[17px]">{heroDestinationLabel}</p>
+              </div>
             </div>
-
           </div>
         </section>
 
-        {/* WHAT WE ACTUALLY CHECK
-            This replaced a row of impact statistics that were not sourced.
-            A product whose entire promise is "no fabricated data" cannot open
-            with invented numbers, so it now lists the real sources instead. */}
-        <section className="border-y border-black/5 bg-white py-12">
+        {/* --------------------- What we actually check ---------------------
+            Kept — this was already the strongest part of the page. Given
+            more room and the shared provenance badge rather than one-off
+            colour classes. */}
+        <section className="bg-white py-16">
           <div className="mx-auto max-w-[1400px] px-5 md:px-8">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[#d97745]">
-                  What we actually check
-                </span>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
+                <p className="t-label text-[#8a5a3b]">What we actually check</p>
+                <h2 className="t-headline mt-2">
                   Every figure is labelled by where it came from.
                 </h2>
               </div>
-              <Link
-                href="/reality"
-                className="text-sm font-semibold text-[#171717] hover:underline"
-              >
+              <Link href="/reality" className="t-body font-semibold text-[#171717] hover:underline">
                 See a Reality Check →
               </Link>
             </div>
 
-            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                {
-                  label: "Live",
-                  tone: "border-emerald-200 bg-emerald-50 text-emerald-800",
-                  title: "Fetched now",
-                  body: "Weather, forecast, air quality and sea conditions from Open-Meteo. Local disruption reports from published news sources, linked so you can read them yourself.",
-                },
-                {
-                  label: "Estimate",
-                  tone: "border-black/10 bg-white text-[#6b6b66]",
-                  title: "Worked out by us",
-                  body: "Realistic travel time modelled from distance, time of day and city size. We have no live traffic feed, and we never pretend otherwise.",
-                },
-                {
-                  label: "Approx.",
-                  tone: "border-black/10 bg-white text-[#6b6b66]",
-                  title: "Ranges, not quotes",
-                  body: "Costs are given as ranges across stay, food, transport, attractions and a buffer — never as a guaranteed price.",
-                },
-                {
-                  label: "Unavailable",
-                  tone: "border-neutral-200 bg-neutral-100 text-neutral-600",
-                  title: "When we don't know",
-                  body: "If a source is down or the data doesn't exist, we say so. An honest gap is more useful than a confident guess.",
-                },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-[20px] border border-black/5 bg-[#fbfbfa] p-6"
-                >
-                  <span
-                    className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${item.tone}`}
-                  >
-                    {item.label}
-                  </span>
-                  <h3 className="mt-3 text-base font-semibold text-[#171717]">
-                    {item.title}
-                  </h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-[#666]">
-                    {item.body}
-                  </p>
+            <div className="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+              {PROVENANCE_COLUMNS.map((column) => (
+                <div key={column.label}>
+                  <ProvenanceBadge label={column.label} />
+                  <h3 className="t-title mt-3 text-[17px]">{column.title}</h3>
+                  <p className="t-body mt-2">{column.body}</p>
                 </div>
               ))}
             </div>
 
-            <p className="mt-6 max-w-3xl text-xs leading-relaxed text-[#8f8f88]">
+            <p className="t-caption mt-10 max-w-3xl border-t border-[rgba(0,0,0,0.08)] pt-6">
               When conditions affect a stop on your plan, we tell you what
               happened, why it matters and the likely impact — then you choose.
               Keep your plan, or see alternatives. Nothing changes until you
@@ -230,159 +319,89 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ONE TOURISM HUB ECOSYSTEM (SIH PPT Slide 2 & 3) */}
-        <section id="tourism-hub" className="py-20 px-5 md:px-8">
-          <div className="mx-auto max-w-[1400px]">
-            <div className="text-center">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#d97745]">
-                One Tourism Hub
-              </span>
-              <h2 className="mt-2 text-3xl font-bold tracking-tight md:text-5xl">
-                An intelligent ecosystem, not just another booking app.
-              </h2>
-              <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-[#666]">
-                Replacing multiple fragmented apps with a unified system connecting tourists, local hotels, authentic food businesses, and regional artisans.
-              </p>
-            </div>
-
-            <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              
-              <div className="rounded-[24px] border border-black/5 bg-white p-7 shadow-sm transition hover:shadow-md">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#d97745]/10 text-2xl">
-                  🤖
-                </div>
-                <h3 className="mt-5 text-lg font-bold">AI Trip Planner</h3>
-                <p className="mt-2 text-xs leading-relaxed text-[#666]">
-                  Generates day-by-day itineraries personalized around user budget, time, and specific interests.
-                </p>
-              </div>
-
-              <div className="rounded-[24px] border border-black/5 bg-white p-7 shadow-sm transition hover:shadow-md">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-2xl">
-                  💰
-                </div>
-                <h3 className="mt-5 text-lg font-bold">Smart Budgeting</h3>
-                <p className="mt-2 text-xs leading-relaxed text-[#666]">
-                  Calculates real stay, food, transport, and activity allocations with automated saving alternatives.
-                </p>
-              </div>
-
-              <div className="rounded-[24px] border border-black/5 bg-white p-7 shadow-sm transition hover:shadow-md">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-2xl">
-                  🗺️
-                </div>
-                <h3 className="mt-5 text-lg font-bold">Route Optimization</h3>
-                <p className="mt-2 text-xs leading-relaxed text-[#666]">
-                  Clusters geographically proximate stops per day to minimize zigzagging and urban transit fatigue.
-                </p>
-              </div>
-
-              <div className="rounded-[24px] border border-black/5 bg-white p-7 shadow-sm transition hover:shadow-md">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-2xl">
-                  🤝
-                </div>
-                <h3 className="mt-5 text-lg font-bold">Local Business Connect</h3>
-                <p className="mt-2 text-xs leading-relaxed text-[#666]">
-                  Gives local boutique hotels, street food artisans, and cultural guides direct digital visibility to incoming travelers.
-                </p>
-              </div>
-
-            </div>
-          </div>
-        </section>
-
-        {/* POPULAR DESTINATIONS GRID */}
-        <section className="border-t border-black/5 bg-white py-20 px-5 md:px-8">
-          <div className="mx-auto max-w-[1400px]">
+        {/* -------------------------- Featured trips -------------------------
+            Replaces the old emoji-icon feature grid and the separate
+            destination grid with one imagery-forward section. */}
+        <section className="border-t border-[rgba(0,0,0,0.08)] py-16">
+          <div className="mx-auto max-w-[1400px] px-5 md:px-8">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#d97745]">
-                  Featured Destinations
-                </span>
-                <h2 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">
-                  Explore iconic journeys
-                </h2>
+                <p className="t-label text-[#8a5a3b]">Featured trips</p>
+                <h2 className="t-headline mt-2">Start from somewhere real</h2>
               </div>
-              <Link
-                href="/planner"
-                className="text-xs font-bold text-[#d97745] hover:underline"
-              >
-                View all destinations →
+              <Link href="/planner" className="t-body font-semibold text-[#171717] hover:underline">
+                Plan something else →
               </Link>
             </div>
 
             <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              {POPULAR_DESTINATIONS.map((dest) => (
-                <div
-                  key={dest.name}
-                  onClick={() => handleQuickPlan(dest.name)}
-                  className="group cursor-pointer overflow-hidden rounded-[26px] border border-black/5 bg-[#fbfbfa] shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              {FEATURED.map((trip) => (
+                <button
+                  key={trip.name}
+                  onClick={() => handleQuickPlan(trip)}
+                  className="group overflow-hidden rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white text-left transition hover:border-[rgba(0,0,0,0.2)]"
                 >
-                  <div className="relative aspect-[4/3] overflow-hidden bg-gray-100">
+                  <div className="relative aspect-[4/3] overflow-hidden bg-[#eeece7]">
                     <img
-                      src={dest.image}
-                      alt={dest.name}
+                      src={trip.image}
+                      alt={trip.name}
+                      loading="lazy"
                       className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
                     />
-                    <span className="absolute bottom-3 left-3 rounded-full bg-black/75 px-3 py-1 text-xs font-semibold text-white backdrop-blur">
-                      {dest.days}
-                    </span>
-                    <span className="absolute bottom-3 right-3 rounded-full bg-white/95 px-3 py-1 text-xs font-bold text-gray-900 shadow-sm backdrop-blur">
-                      {dest.estBudget}
+                    <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur">
+                      {trip.days} days
                     </span>
                   </div>
-
-                  <div className="p-5">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#d97745]">
-                      {dest.state}
+                  <div className="p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a5a3b]">
+                      {trip.state}
                     </p>
-                    <h3 className="mt-1 text-xl font-bold text-[#171717] group-hover:text-[#d97745] transition">
-                      {dest.name}
+                    <h3 className="t-title mt-1 text-[17px] text-[#171717] transition group-hover:text-[#d97745]">
+                      {trip.name}
                     </h3>
-                    <p className="mt-1 text-xs text-[#777] line-clamp-1">{dest.tag}</p>
-
-                    <div className="mt-4 flex flex-wrap gap-1">
-                      {dest.highlights.map((hl) => (
-                        <span
-                          key={hl}
-                          className="rounded-md bg-white border border-black/5 px-2 py-0.5 text-[10px] text-[#555]"
-                        >
-                          {hl}
-                        </span>
-                      ))}
-                    </div>
+                    <p className="t-body mt-1 text-[13px] line-clamp-2">{trip.tag}</p>
+                    <Meta className="mt-2.5 block">
+                      ₹{Number(trip.budget).toLocaleString("en-IN")} estimated
+                    </Meta>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
-
           </div>
         </section>
 
-        {/* CALL TO ACTION */}
-        <section className="py-20 px-5 md:px-8">
-          <div className="mx-auto max-w-4xl rounded-[36px] bg-[#171717] p-10 text-center text-white shadow-2xl md:p-16">
-            <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#dca17e]">
-              Smart India Hackathon 2026
-            </span>
-            <h2 className="mt-3 text-3xl font-extrabold tracking-tight md:text-5xl">
-              Ready to experience intelligent travel?
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl text-xs leading-relaxed text-white/70 md:text-sm">
-              Launch your personalized journey now with AI recommendations, route optimization, and live weather.
-            </p>
-            <div className="mt-8 flex justify-center">
-              <Link
-                href="/planner"
-                className="inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 text-sm font-bold text-[#171717] shadow-lg transition hover:bg-gray-100"
-              >
-                <span>Launch Trip Planner</span>
-                <span>→</span>
-              </Link>
+        {/* ------------------------------- CTA ---------------------------------
+            Simplified. The hackathon-branding block is gone; this links
+            onward to the surfaces that actually exist. */}
+        <section className="border-t border-[rgba(0,0,0,0.08)] bg-white py-16">
+          <div className="mx-auto max-w-[1400px] px-5 md:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-6 rounded-2xl bg-[#171717] px-8 py-10 text-white md:px-12 md:py-14">
+              <div className="max-w-lg">
+                <h2 className="t-headline text-white">
+                  Plan with the full picture.
+                </h2>
+                <p className="t-body mt-3 text-white/70">
+                  Real weather, realistic travel time, honest costs — checked
+                  against the plan you actually build.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2.5">
+                <Link href="/planner">
+                  <Button variant="accent" size="lg">Plan a trip</Button>
+                </Link>
+                <Link href="/hotels">
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    className="border-white/25 text-white hover:bg-white/10"
+                  >
+                    Browse hotels
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
         </section>
-
       </main>
 
       <Footer />

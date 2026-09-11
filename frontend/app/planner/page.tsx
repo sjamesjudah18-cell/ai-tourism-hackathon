@@ -111,6 +111,26 @@ export default function PlannerPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Home's quick-plan buttons and featured destinations write a trip here
+  // before navigating in. Reading it once on mount is what makes "tap Goa on
+  // the homepage" actually land on Goa here, instead of the hardcoded default.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("smartTourismTrip");
+      if (!raw) return;
+      const stored = JSON.parse(raw);
+      if (stored.destination) setDestination(stored.destination);
+      if (stored.days) setDays(String(stored.days));
+      if (stored.travelers) setTravelers(String(stored.travelers));
+      if (stored.budget) setBudget(String(stored.budget));
+      if (stored.interests) setInterests(stored.interests);
+      if (stored.transport) setTransport(stored.transport);
+      if (stored.hotel) setHotel(stored.hotel);
+    } catch {
+      /* malformed or unavailable storage — defaults stand */
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       const rows = await fetchDestinations();
