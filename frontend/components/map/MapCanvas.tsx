@@ -77,12 +77,14 @@ function ViewportController() {
 function RouteLine() {
   const map = useMap();
   // Loading the library through the hook keeps this typed without depending on
-  // the `google` global being present at compile time.
+  // the `google` global being present at compile time. Polyline lives in
+  // "maps", but the SymbolPath enum lives in "core" — both must be loaded.
   const mapsLibrary = useMapsLibrary("maps");
+  const coreLibrary = useMapsLibrary("core");
   const { routePath } = useMapState();
 
   useEffect(() => {
-    if (!map || !mapsLibrary || routePath.length < 2) return;
+    if (!map || !mapsLibrary || !coreLibrary || routePath.length < 2) return;
 
     const line = new mapsLibrary.Polyline({
       path: routePath.map((m) => ({ lat: m.lat, lng: m.lng })),
@@ -94,7 +96,7 @@ function RouteLine() {
       icons: [
         {
           icon: {
-            path: mapsLibrary.SymbolPath.CIRCLE,
+            path: coreLibrary.SymbolPath.CIRCLE,
             fillOpacity: 1,
             fillColor: "#171717",
             strokeOpacity: 0,
@@ -108,7 +110,7 @@ function RouteLine() {
 
     line.setMap(map);
     return () => line.setMap(null);
-  }, [map, mapsLibrary, routePath]);
+  }, [map, mapsLibrary, coreLibrary, routePath]);
 
   return null;
 }
