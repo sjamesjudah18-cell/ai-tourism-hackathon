@@ -16,6 +16,8 @@ from app.routes.recommendations import router as recommendations_router
 from app.routes.budget import router as budget_router
 from app.routes.itinerary import router as itinerary_router
 from app.routes.trips import router as trips_router
+from app.routes.hotels import router as hotels_router
+from app.routes.assistant import router as assistant_router
 
 app = FastAPI(
     title="Smart Tourism API",
@@ -42,6 +44,8 @@ app.include_router(recommendations_router)
 app.include_router(budget_router)
 app.include_router(itinerary_router)
 app.include_router(trips_router)
+app.include_router(hotels_router)
+app.include_router(assistant_router)
 
 @app.get("/")
 def root():

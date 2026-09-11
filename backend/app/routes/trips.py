@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -22,6 +21,11 @@ class TripCreate(BaseModel):
     number_of_days: int
     total_budget: float
 
+    number_of_travelers: int = 1
+    interests: list[str] = []
+    transport_preference: str | None = None
+    accommodation_preference: str | None = None
+
 
 @router.post("/")
 def create_trip(
@@ -34,7 +38,12 @@ def create_trip(
         start_date=trip_data.start_date,
         end_date=trip_data.end_date,
         number_of_days=trip_data.number_of_days,
-        total_budget=trip_data.total_budget
+        total_budget=trip_data.total_budget,
+
+        number_of_travelers=trip_data.number_of_travelers,
+        interests=trip_data.interests,
+        transport_preference=trip_data.transport_preference,
+        accommodation_preference=trip_data.accommodation_preference
     )
 
     db.add(trip)
@@ -50,7 +59,12 @@ def create_trip(
             "start_date": trip.start_date,
             "end_date": trip.end_date,
             "number_of_days": trip.number_of_days,
-            "total_budget": trip.total_budget
+            "total_budget": trip.total_budget,
+
+            "number_of_travelers": trip.number_of_travelers,
+            "interests": trip.interests,
+            "transport_preference": trip.transport_preference,
+            "accommodation_preference": trip.accommodation_preference
         }
     }
 
