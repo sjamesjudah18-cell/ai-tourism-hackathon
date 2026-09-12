@@ -22,6 +22,11 @@ import ItineraryCard from "../../components/ItineraryCard";
 import MapCanvas from "../../components/map/MapCanvas";
 import MarkerPreview from "../../components/map/MarkerPreview";
 import Navbar from "../../components/Navbar";
+import AirportTransferCard from "../../components/planner/AirportTransferCard";
+import BudgetOptimizer from "../../components/planner/BudgetOptimizer";
+import DayTimeline from "../../components/planner/DayTimeline";
+import FlightOptions from "../../components/planner/FlightOptions";
+import VehicleCostCard from "../../components/planner/VehicleCostCard";
 import TravelUpdateCard from "../../components/reality/TravelUpdateCard";
 import {
   BriefingSkeleton,
@@ -42,9 +47,11 @@ import {
   ItineraryDay,
   ItineraryResponse,
   fetchRealityCheck,
+  fetchTripPlan,
   generateItinerary,
 } from "../../lib/api";
 import type { RealityStatus, TravelAlert, TravelReality } from "../../types/reality";
+import type { TripPlanResponse, VehicleConfig } from "../../types/planner";
 
 const STORAGE_KEY = "smartTourismTrip";
 const ITINERARY_KEY = "aiTourismItinerary";
@@ -87,6 +94,11 @@ function ItineraryPage() {
 
   const [reality, setReality] = useState<TravelReality | null>(null);
   const [loadingReality, setLoadingReality] = useState(false);
+
+  const [tripPlan, setTripPlan] = useState<TripPlanResponse | null>(null);
+  const [loadingPlan, setLoadingPlan] = useState(false);
+  const [selectedOutboundFlightId, setSelectedOutboundFlightId] = useState<string | null>(null);
+  const [selectedReturnFlightId, setSelectedReturnFlightId] = useState<string | null>(null);
 
   const [mobileMapOpen, setMobileMapOpen] = useState(false);
   const stopRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -164,6 +176,48 @@ function ItineraryPage() {
     loadReality(itinerary, tripConfig);
   }, [loading, itinerary, tripConfig, loadReality]);
 
+  /* --------------- The connected plan: flights, transfer, budget -------- */
+  const loadPlan = useCallback(async (trip: any) => {
+    if (!trip) return;
+    setLoadingPlan(true);
+    const transportPref: string = trip.transport || "Any";
+    const wantsVehicle = ["car", "bike"].includes(transportPref.trim().toLowerCase());
+    const vehicle: VehicleConfig | null = wantsVehicle
+      ? {
+          vehicle_type: transportPref.trim().toLowerCase() as "car" | "bike",
+          ownership: trip.vehicle_ownership === "rental" ? "rental" : "personal",
+          fuel_type: trip.vehicle_fuel_type || "petrol",
+          mileage_kmpl: trip.vehicle_mileage ? Number(trip.vehicle_mileage) : undefined,
+          fuel_price_per_liter: trip.vehicle_fuel_price ? Number(trip.vehicle_fuel_price) : undefined,
+          rental_cost_per_day: trip.vehicle_rental_cost ? Number(trip.vehicle_rental_cost) : undefined,
+        }
+      : null;
+
+    const result = await fetchTripPlan({
+      destination: trip.destination || "Hyderabad",
+      origin: trip.origin || undefined,
+      number_of_days: Number(trip.days || trip.number_of_days || 4),
+      total_budget: Number(trip.budget || trip.total_budget || 25000),
+      number_of_travelers: Number(trip.travelers || trip.number_of_travelers || 2),
+      interests: trip.interests || DEFAULT_TRIP.interests,
+      transport_preference: transportPref,
+      accommodation_preference: trip.hotel || "Comfort",
+      start_date: trip.start_date || undefined,
+      selected_flight_id: selectedOutboundFlightId,
+      selected_return_flight_id: selectedReturnFlightId,
+      vehicle,
+    });
+    if (result) setTripPlan(result);
+    setLoadingPlan(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOutboundFlightId, selectedReturnFlightId]);
+
+  useEffect(() => {
+    if (loading || !tripConfig) return;
+    loadPlan(tripConfig);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, tripConfig, loadPlan]);
+
   useEffect(() => {
     if (itinerary.length === 0 || !tripConfig) return;
     try {
@@ -179,6 +233,13 @@ function ItineraryPage() {
   /* --------------------------- Derived state --------------------------- */
   const destinationName =
     data?.destination || tripConfig?.destination || "Hyderabad";
+
+  const currentPlanDay = useMemo(
+    () => tripPlan?.itinerary.find((d) => d.day === selectedDay) ?? null,
+    [tripPlan, selectedDay]
+  );
+  const isFirstDay = selectedDay === 1;
+  const isLastDay = selectedDay === itinerary.length;
 
   const currentDay = useMemo(
     () => itinerary.find((d) => d.day === selectedDay) ?? itinerary[0] ?? null,
@@ -414,6 +475,51 @@ function ItineraryPage() {
             </section>
           )}
 
+          {/* Flights — only once we know where the traveller is starting from */}
+          {tripPlan && !tripPlan.flights.requires_origin && (
+            <section className="mb-6 space-y-4 border-b border-[rgba(0,0,0,0.08)] pb-6">
+              <p className="t-label text-[#8a5a3b]">Flights</p>
+              <FlightOptions
+                title="Outbound"
+                result={tripPlan.flights.outbound}
+                selectedId={tripPlan.flights.selected_outbound_id}
+                onSelect={setSelectedOutboundFlightId}
+              />
+              <FlightOptions
+                title="Return"
+                result={tripPlan.flights.return}
+                selectedId={tripPlan.flights.selected_return_id}
+                onSelect={setSelectedReturnFlightId}
+              />
+              {tripPlan.airport_transfer.outbound?.available && (
+                <AirportTransferCard title="Airport → hotel" plan={tripPlan.airport_transfer.outbound} />
+              )}
+              {tripPlan.airport_transfer.return?.available && (
+                <AirportTransferCard title="Hotel → airport (return)" plan={tripPlan.airport_transfer.return} />
+              )}
+            </section>
+          )}
+
+          {/* Car / bike cost, when self-driving */}
+          {tripPlan?.vehicle_cost && (
+            <section className="mb-6 border-b border-[rgba(0,0,0,0.08)] pb-6">
+              <p className="t-label mb-3 text-[#8a5a3b]">Transport cost</p>
+              <VehicleCostCard cost={tripPlan.vehicle_cost} />
+            </section>
+          )}
+
+          {/* Budget & cost optimization */}
+          {tripPlan?.budget && (
+            <section className="mb-6 border-b border-[rgba(0,0,0,0.08)] pb-6">
+              <BudgetOptimizer budget={tripPlan.budget} />
+            </section>
+          )}
+          {loadingPlan && !tripPlan && (
+            <div className="mb-6">
+              <BriefingSkeleton title="Building your full trip plan" />
+            </div>
+          )}
+
           <DayRail
             days={itinerary}
             activeDay={selectedDay}
@@ -445,6 +551,16 @@ function ItineraryPage() {
               )}
             </div>
           </div>
+
+          {/* Realistic clock-time schedule for the day, including flight/transfer/checkin buffers */}
+          {currentPlanDay?.timeline && currentPlanDay.timeline.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-[rgba(0,0,0,0.07)] bg-[#faf9f7] p-4">
+              <p className="t-label mb-3">
+                {isFirstDay ? "Arrival day schedule" : isLastDay ? "Departure day schedule" : "Today's schedule"}
+              </p>
+              <DayTimeline blocks={currentPlanDay.timeline} />
+            </div>
+          )}
 
           {/* Alerts for this day — one component, one visual language */}
           {dayAlerts.length > 0 && (

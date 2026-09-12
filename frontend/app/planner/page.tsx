@@ -101,6 +101,11 @@ export default function PlannerPage() {
   const [hotel, setHotel] = useState("Comfort");
   const [startDate, setStartDate] = useState("");
   const [origin, setOrigin] = useState("");
+  const [vehicleOwnership, setVehicleOwnership] = useState("personal");
+  const [vehicleFuelType, setVehicleFuelType] = useState("petrol");
+  const [vehicleMileage, setVehicleMileage] = useState("");
+  const [vehicleFuelPrice, setVehicleFuelPrice] = useState("");
+  const [vehicleRentalCost, setVehicleRentalCost] = useState("");
   const [interests, setInterests] = useState<string[]>([
     "Food",
     "Culture",
@@ -228,6 +233,11 @@ export default function PlannerPage() {
       hotel,
       start_date: startDate || undefined,
       origin: origin.trim() || undefined,
+      vehicle_ownership: vehicleOwnership,
+      vehicle_fuel_type: vehicleFuelType,
+      vehicle_mileage: vehicleMileage || undefined,
+      vehicle_fuel_price: vehicleFuelPrice || undefined,
+      vehicle_rental_cost: vehicleRentalCost || undefined,
     };
 
     sessionStorage.setItem("smartTourismTrip", JSON.stringify(tripData));
@@ -487,7 +497,7 @@ export default function PlannerPage() {
                     onChange={(e) => setTransport(e.target.value)}
                     className={inputClass}
                   >
-                    {["Any", "Public transport", "Taxi / Cab", "Car", "Walking"].map(
+                    {["Any", "Public transport", "Taxi / Cab", "Car", "Bike", "Walking"].map(
                       (option) => (
                         <option key={option} value={option}>
                           {option}
@@ -511,6 +521,73 @@ export default function PlannerPage() {
                   </select>
                 </Field>
               </div>
+
+              {/* Vehicle details, only relevant when self-driving */}
+              {(transport === "Car" || transport === "Bike") && (
+                <div className="mt-5 grid gap-5 rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#faf9f7] p-4 sm:grid-cols-2">
+                  <Field label="Ownership">
+                    <select
+                      value={vehicleOwnership}
+                      onChange={(e) => setVehicleOwnership(e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="personal">Personal vehicle</option>
+                      <option value="rental">Rental</option>
+                    </select>
+                  </Field>
+
+                  <Field label="Fuel type">
+                    <select
+                      value={vehicleFuelType}
+                      onChange={(e) => setVehicleFuelType(e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="petrol">Petrol</option>
+                      {transport === "Car" && <option value="diesel">Diesel</option>}
+                      <option value="electric">Electric</option>
+                    </select>
+                  </Field>
+
+                  <Field
+                    label="Mileage (km/L)"
+                    optional
+                    hint={`Defaults to a typical ${transport.toLowerCase()} if left blank.`}
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      value={vehicleMileage}
+                      onChange={(e) => setVehicleMileage(e.target.value)}
+                      placeholder={transport === "Bike" ? "40" : "15"}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Fuel price (₹/L)" optional hint="Defaults to a reviewed reference price.">
+                    <input
+                      type="number"
+                      min={0}
+                      value={vehicleFuelPrice}
+                      onChange={(e) => setVehicleFuelPrice(e.target.value)}
+                      placeholder="105"
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  {vehicleOwnership === "rental" && (
+                    <Field label="Rental cost (₹/day)" optional>
+                      <input
+                        type="number"
+                        min={0}
+                        value={vehicleRentalCost}
+                        onChange={(e) => setVehicleRentalCost(e.target.value)}
+                        placeholder={transport === "Bike" ? "500" : "1800"}
+                        className={inputClass}
+                      />
+                    </Field>
+                  )}
+                </div>
+              )}
             </section>
 
             {error && (

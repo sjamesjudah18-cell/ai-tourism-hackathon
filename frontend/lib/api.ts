@@ -8,6 +8,7 @@ import type {
   TravelAlert,
   TravelReality,
 } from "../types/reality";
+import type { TripPlanRequest, TripPlanResponse } from "../types/planner";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -390,6 +391,25 @@ export async function confirmItineraryChange(params: {
   }
 
   return response.json();
+}
+
+/* ---------------------------- Trip planner ----------------------------- */
+
+/**
+ * The connected trip plan: flights, hotel, airport transfer, car/bike cost,
+ * a realistic clock-time itinerary, and the full budget - all tied to
+ * whatever the traveller has selected so far. Re-call this with
+ * `selected_flight_id` / `selected_hotel_id` / `vehicle` whenever a choice
+ * changes, so every panel on the page stays in sync with one source of truth.
+ */
+export async function fetchTripPlan(
+  params: TripPlanRequest
+): Promise<TripPlanResponse | null> {
+  return safeJson<TripPlanResponse>(`${API_URL}/api/planner/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
 }
 
 /* ------------------------- Notifications ------------------------------ */

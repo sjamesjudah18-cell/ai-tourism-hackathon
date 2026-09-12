@@ -24,6 +24,7 @@ from app.routes.assistant import router as assistant_router
 from app.routes.reality import router as reality_router
 from app.routes.alerts import router as alerts_router
 from app.routes.notifications import router as notifications_router
+from app.routes.planner import router as planner_router
 
 app = FastAPI(
     title="AI Tourism API",
@@ -57,6 +58,7 @@ app.include_router(assistant_router)
 app.include_router(reality_router)
 app.include_router(alerts_router)
 app.include_router(notifications_router)
+app.include_router(planner_router)
 
 @app.get("/")
 def root():
